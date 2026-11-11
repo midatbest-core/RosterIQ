@@ -258,4 +258,49 @@ export const api = {
     request<import('./types').BrandChangeRequest>(`/brand-portal/requests/${requestId}/mark-implemented`, {
       method: 'POST',
     }),
+  // Employee Portal
+  getEmployeeProfile: () => request<import('./types').EmployeeProfile>('/employee-portal/me'),
+  getEmployeeTasks: (month?: number, year?: number) => {
+    let url = '/employee-portal/tasks';
+    const params: string[] = [];
+    if (month) params.push(`month=${month}`);
+    if (year) params.push(`year=${year}`);
+    if (params.length > 0) url += `?${params.join('&')}`;
+    return request<import('./types').EmployeeTaskItem[]>(url);
+  },
+  submitEmployeeRequest: (data: {
+    request_type: string;
+    start_date: string;
+    end_date: string;
+    reason_type: string;
+    notes: string;
+    details?: string;
+  }) =>
+    request<import('./types').EmployeeAvailabilityRequest>('/employee-portal/requests', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getEmployeeRequests: () =>
+    request<import('./types').EmployeeAvailabilityRequest[]>('/employee-portal/requests'),
+  getEmployeeRequestDetail: (requestId: string) =>
+    request<import('./types').EmployeeAvailabilityRequest>(`/employee-portal/requests/${requestId}`),
+  previewEmployeeRequestImpact: (requestId: string) =>
+    request<import('./types').EmployeeImpactPreview>(`/employee-portal/requests/${requestId}/preview-impact`, {
+      method: 'POST',
+    }),
+  approveEmployeeRequest: (requestId: string, managerNotes?: string) =>
+    request<import('./types').EmployeeAvailabilityRequest>(`/employee-portal/requests/${requestId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ manager_notes: managerNotes }),
+    }),
+  rejectEmployeeRequest: (requestId: string, managerNotes: string) =>
+    request<import('./types').EmployeeAvailabilityRequest>(`/employee-portal/requests/${requestId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ manager_notes: managerNotes }),
+    }),
+  markEmployeeRequestImplemented: (requestId: string, rosterId?: string) => {
+    let url = `/employee-portal/requests/${requestId}/mark-implemented`;
+    if (rosterId) url += `?roster_id=${rosterId}`;
+    return request<import('./types').EmployeeAvailabilityRequest>(url, { method: 'POST' });
+  },
 };

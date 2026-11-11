@@ -1,0 +1,547 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.db.session import get_db
+from app.core.errors import AppError
+from app.modules.auth.dependencies import (
+    check_employee_scope,
+    get_current_user,
+    require_employee_user,
+    require_lead_or_manager,
+    require_manager,
+)
+from app.modules.auth.models import User, UserRole
+from app.modules.auth.notifications import create_notification, notify_managers
+from app.modules.operations.models import Brand, BrandProcess, Process
+from app.modules.roster.models import Roster, RosterAllocation, RosterStatus
+from app.modules.roster.router import check_and_mark_stale_rosters, compute_config_hash
+from app.modules.workforce.availability_models import AbsenceReasonType, EmployeeUnavailability
+from app.modules.workforce.employee_portal_schemas import (
+    EmployeeAvailabilityRequestCreate,
+    EmployeeAvailabilityRequestRead,
+    EmployeeImpactPreview,
+    EmployeeProfileRead,
+    EmployeeReviewActionRequest,
+    EmployeeTaskItem,
+)
+from app.modules.workforce.models import Employee, EmployeeProcessSkill, Pod, PodLead
+from app.modules.workforce.request_models import EmployeeAvailabilityRequest, RequestStatus
+
+router = APIRouter(prefix="/employee-portal", tags=["Employee Portal"])
+
+
+@router.get("/me", response_model=EmployeeProfileRead)
+def get_employee_profile(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_employee_user),
+) -> EmployeeProfileRead:
+    """Returns the authenticated employee's personal profile, pod lead info, skills, and primary assignments."""
+    if not user.employee_id:
+        raise AppError("FORBIDDEN", "User is not linked to any employee record.", 403)
+
+    emp = db.get(Employee, user.employee_id)
+    if not emp:
+        raise AppError("NOT_FOUND", "Employee record not found.", 404)
+
+    pod = db.get(Pod, emp.pod_id) if emp.pod_id else None
+    pod_lead_name = None
+    pod_lead_email = None
+
+    if pod:
+        # Check PodLead
+        lead_link = db.scalar(select(PodLead).where(PodLead.pod_id == pod.id))
+        if lead_link:
+            lead_emp = db.get(Employee, lead_link.employee_id)
+            if lead_emp:
+                pod_lead_name = lead_emp.name
+                pod_lead_email = lead_emp.email
+
+    # Primary assignments
+    assignments_data = []
+    for pa in getattr(emp, "primary_assignments", []):
+        bp = db.get(BrandProcess, pa.brand_process_id)
+        if bp:
+            b = db.get(Brand, bp.brand_id)
+            p = db.get(Process, bp.process_id)
+            assignments_data.append({
+                "assignment_id": str(pa.id),
+                "brand_id": str(b.id) if b else None,
+                "brand_name": b.name if b else "Unknown",
+                "process_id": str(p.id) if p else None,
+                "process_name": p.name if p else "Unknown",
+                "effective_from": pa.effective_from.isoformat() if pa.effective_from else None,
+            })
+
+    # Skills
+    skills_data = []
+    skills = db.scalars(select(EmployeeProcessSkill).where(EmployeeProcessSkill.employee_id == emp.id)).all()
+    for s in skills:
+        proc = db.get(Process, s.process_id)
+        skills_data.append({
+            "process_id": str(s.process_id),
+            "process_name": proc.name if proc else "Unknown",
+            "proficiency": s.proficiency.value if hasattr(s.proficiency, "value") else str(s.proficiency),
+        })
+
+    return EmployeeProfileRead(
+        employee_id=emp.id,
+        employee_code=emp.employee_code,
+        name=emp.name,
+        email=emp.email,
+        pod_id=emp.pod_id,
+        pod_name=pod.name if pod else None,
+        pod_lead_name=pod_lead_name,
+        pod_lead_email=pod_lead_email,
+        daily_capacity_minutes=emp.daily_capacity_minutes,
+        standard_start_time=emp.standard_start_time.isoformat(),
+        standard_end_time=emp.standard_end_time.isoformat(),
+        primary_assignments=assignments_data,
+        skills=skills_data,
+    )
+
+
+@router.get("/tasks", response_model=list[EmployeeTaskItem])
+def get_employee_tasks(
+    month: int | None = None,
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_employee_user),
+) -> list[EmployeeTaskItem]:
+    """Returns the employee's scheduled work items/allocations as a structured task checklist."""
+    if not user.employee_id:
+        raise AppError("FORBIDDEN", "User is not linked to any employee record.", 403)
+
+    query = select(RosterAllocation).where(RosterAllocation.employee_id == user.employee_id)
+
+    # Filter to active published or draft rosters
+    allocs = db.scalars(query).all()
+    # Cache rosters, brands, processes
+    roster_cache: dict[UUID, Roster] = {}
+    bp_cache: dict[UUID, BrandProcess] = {}
+    brand_cache: dict[UUID, Brand] = {}
+    proc_cache: dict[UUID, Process] = {}
+
+    tasks: list[EmployeeTaskItem] = []
+    for a in allocs:
+        if a.roster_id not in roster_cache:
+            r = db.get(Roster, a.roster_id)
+            if r:
+                roster_cache[a.roster_id] = r
+        roster = roster_cache.get(a.roster_id)
+        if not roster:
+            continue
+
+        if month and roster.month != month:
+            continue
+        if year and roster.year != year:
+            continue
+
+        if a.brand_process_id not in bp_cache:
+            bp = db.get(BrandProcess, a.brand_process_id)
+            if bp:
+                bp_cache[a.brand_process_id] = bp
+        bp = bp_cache.get(a.brand_process_id)
+        if not bp:
+            continue
+
+        if bp.brand_id not in brand_cache:
+            b = db.get(Brand, bp.brand_id)
+            if b:
+                brand_cache[bp.brand_id] = b
+        brand = brand_cache.get(bp.brand_id)
+
+        if bp.process_id not in proc_cache:
+            p = db.get(Process, bp.process_id)
+            if p:
+                proc_cache[bp.process_id] = p
+        process = proc_cache.get(bp.process_id)
+
+        day_name = a.date.strftime("%A")
+        tasks.append(
+            EmployeeTaskItem(
+                allocation_id=a.id,
+                roster_id=roster.id,
+                roster_name=roster.name,
+                roster_status=roster.status.value,
+                date=a.date.isoformat(),
+                day_of_week=day_name,
+                start_time=a.start_time.isoformat(),
+                end_time=a.end_time.isoformat(),
+                brand_name=brand.name if brand else "Brand",
+                brand_code=brand.code if brand else "",
+                process_name=process.name if process else "Process",
+                process_code=process.code if process else "",
+                allocation_type=a.allocation_type.value if hasattr(a.allocation_type, "value") else str(a.allocation_type),
+            )
+        )
+
+    tasks.sort(key=lambda t: (t.date, t.start_time))
+    return tasks
+
+
+@router.post("/requests", response_model=EmployeeAvailabilityRequestRead, status_code=201)
+def submit_availability_request(
+    payload: EmployeeAvailabilityRequestCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_employee_user),
+) -> EmployeeAvailabilityRequestRead:
+    """Submits an employee absence or availability adjustment request (leaves active availability unchanged until manager approval)."""
+    if not user.employee_id:
+        raise AppError("FORBIDDEN", "User is not linked to any employee record.", 403)
+
+    emp = db.get(Employee, user.employee_id)
+    if not emp:
+        raise AppError("NOT_FOUND", "Employee not found.", 404)
+
+    start_d = date.fromisoformat(payload.start_date)
+    end_d = date.fromisoformat(payload.end_date)
+    if end_d < start_d:
+        raise AppError("VALIDATION_ERROR", "End date cannot be earlier than start date.", 422)
+
+    req = EmployeeAvailabilityRequest(
+        employee_id=emp.id,
+        requested_by_user_id=user.id,
+        request_type=payload.request_type,
+        start_date=start_d,
+        end_date=end_d,
+        reason_type=payload.reason_type,
+        notes=payload.notes,
+        details=payload.details,
+        status=RequestStatus.PENDING.value,
+    )
+    db.add(req)
+    db.flush()
+
+    # Notify Ops Managers
+    notify_managers(
+        db=db,
+        title=f"New Leave Request: {emp.name}",
+        message=f"{emp.name} requested {payload.reason_type} from {payload.start_date} to {payload.end_date}: {payload.notes}",
+        notification_type="NEW_EMPLOYEE_REQUEST",
+        reference_type="employee_availability_request",
+        reference_id=req.id,
+    )
+
+    db.commit()
+    db.refresh(req)
+
+    res = EmployeeAvailabilityRequestRead.model_validate(req)
+    res.employee_name = emp.name
+    return res
+
+
+@router.get("/requests", response_model=list[EmployeeAvailabilityRequestRead])
+def list_employee_requests(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[EmployeeAvailabilityRequestRead]:
+    """Lists employee availability requests scoped to the user's role (Employee -> own, Pod Lead -> pod, Manager/Admin -> all)."""
+    query = select(EmployeeAvailabilityRequest).order_by(EmployeeAvailabilityRequest.created_at.desc())
+
+    if user.role == UserRole.EMPLOYEE:
+        if not user.employee_id:
+            return []
+        query = query.where(EmployeeAvailabilityRequest.employee_id == user.employee_id)
+    elif user.role == UserRole.POD_LEAD:
+        if not user.pod_id:
+            return []
+        # Join employee to filter by pod_id
+        pod_emps = db.scalars(select(Employee.id).where(Employee.pod_id == user.pod_id)).all()
+        query = query.where(EmployeeAvailabilityRequest.employee_id.in_(pod_emps))
+
+    items = db.scalars(query).all()
+    emp_map = {e.id: e.name for e in db.scalars(select(Employee)).all()}
+
+    results = []
+    for item in items:
+        r = EmployeeAvailabilityRequestRead.model_validate(item)
+        r.employee_name = emp_map.get(item.employee_id, "Unknown Employee")
+        results.append(r)
+    return results
+
+
+@router.get("/requests/{request_id}", response_model=EmployeeAvailabilityRequestRead)
+def get_employee_request(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> EmployeeAvailabilityRequestRead:
+    """Gets details of an employee availability request with strict IDOR verification."""
+    req = db.get(EmployeeAvailabilityRequest, request_id)
+    if not req:
+        raise AppError("NOT_FOUND", "Request not found.", 404)
+
+    check_employee_scope(user, req.employee_id)
+
+    emp = db.get(Employee, req.employee_id)
+    res = EmployeeAvailabilityRequestRead.model_validate(req)
+    if emp:
+        res.employee_name = emp.name
+    return res
+
+
+@router.post("/requests/{request_id}/preview-impact", response_model=EmployeeImpactPreview)
+def preview_employee_request_impact(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_lead_or_manager),
+) -> EmployeeImpactPreview:
+    """Analyzes the exact impact of an employee absence request on active roster allocations."""
+    req = db.get(EmployeeAvailabilityRequest, request_id)
+    if not req:
+        raise AppError("NOT_FOUND", "Request not found.", 404)
+
+    emp = db.get(Employee, req.employee_id)
+    if not emp:
+        raise AppError("NOT_FOUND", "Employee not found.", 404)
+
+    # Dates range
+    curr = req.start_date
+    dates_list = []
+    while curr <= req.end_date:
+        dates_list.append(curr)
+        curr += timedelta(days=1)
+
+    # Check allocations
+    conflicts = db.scalars(
+        select(RosterAllocation).where(
+            RosterAllocation.employee_id == emp.id,
+            RosterAllocation.date.in_(dates_list),
+        )
+    ).all()
+
+    bp_cache: dict[UUID, BrandProcess] = {}
+    b_cache: dict[UUID, Brand] = {}
+    p_cache: dict[UUID, Process] = {}
+
+    conflict_data = []
+    for c in conflicts:
+        if c.brand_process_id not in bp_cache:
+            bp = db.get(BrandProcess, c.brand_process_id)
+            if bp:
+                bp_cache[c.brand_process_id] = bp
+        bp = bp_cache.get(c.brand_process_id)
+
+        brand_name = "Brand"
+        proc_name = "Process"
+        if bp:
+            if bp.brand_id not in b_cache:
+                b = db.get(Brand, bp.brand_id)
+                if b:
+                    b_cache[bp.brand_id] = b
+            brand = b_cache.get(bp.brand_id)
+            if brand:
+                brand_name = brand.name
+
+            if bp.process_id not in p_cache:
+                p = db.get(Process, bp.process_id)
+                if p:
+                    p_cache[bp.process_id] = p
+            proc = p_cache.get(bp.process_id)
+            if proc:
+                proc_name = proc.name
+
+        conflict_data.append({
+            "allocation_id": str(c.id),
+            "date": c.date.isoformat(),
+            "time": f"{c.start_time.isoformat()} - {c.end_time.isoformat()}",
+            "brand": brand_name,
+            "process": proc_name,
+        })
+
+    summary = (
+        f"Request coincides with {len(conflicts)} active shifts that require reassignment."
+        if conflicts
+        else "No scheduled shifts coincide with this request period."
+    )
+
+    return EmployeeImpactPreview(
+        request_id=req.id,
+        employee_id=emp.id,
+        employee_name=emp.name,
+        request_type=req.request_type,
+        dates=[d.isoformat() for d in dates_list],
+        conflicting_allocations_count=len(conflicts),
+        conflicting_allocations=conflict_data,
+        requires_reassignment=len(conflicts) > 0,
+        summary=summary,
+    )
+
+
+@router.post("/requests/{request_id}/approve", response_model=EmployeeAvailabilityRequestRead)
+def approve_employee_request(
+    request_id: UUID,
+    payload: EmployeeReviewActionRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_manager),
+) -> EmployeeAvailabilityRequestRead:
+    """Transactionally approves employee leave, creates EmployeeUnavailability records, marks rosters STALE, and sets ROSTER_PENDING."""
+    req = db.get(EmployeeAvailabilityRequest, request_id)
+    if not req:
+        raise AppError("NOT_FOUND", "Request not found.", 404)
+    if req.status in (RequestStatus.APPROVED.value, RequestStatus.ROSTER_PENDING.value, RequestStatus.IMPLEMENTED.value):
+        raise AppError("CONFLICT", f"Request is already in {req.status} state.", 409)
+
+    emp = db.get(Employee, req.employee_id)
+    now = datetime.now(timezone.utc)
+
+    # 1. Map reason_type to AbsenceReasonType enum
+    try:
+        r_enum = AbsenceReasonType[req.reason_type]
+    except KeyError:
+        r_enum = AbsenceReasonType.PLANNED_LEAVE
+
+    # 2. Insert EmployeeUnavailability for each date
+    curr = req.start_date
+    while curr <= req.end_date:
+        existing = db.scalar(
+            select(EmployeeUnavailability).where(
+                EmployeeUnavailability.employee_id == emp.id,
+                EmployeeUnavailability.date == curr,
+            )
+        )
+        if not existing:
+            unavail = EmployeeUnavailability(
+                employee_id=emp.id,
+                date=curr,
+                reason_type=r_enum,
+                is_approved=True,
+                notes=req.notes,
+            )
+            db.add(unavail)
+        else:
+            existing.is_approved = True
+            existing.reason_type = r_enum
+            existing.notes = req.notes
+        curr += timedelta(days=1)
+
+    # 3. Mark draft rosters STALE
+    new_hash = compute_config_hash(db)
+    check_and_mark_stale_rosters(db, new_hash)
+
+    # 4. Update status
+    req.status = RequestStatus.ROSTER_PENDING.value
+    review_notes = (payload.manager_notes or payload.notes) if payload else "Approved by Operations Manager."
+    req.review_notes = review_notes
+    req.reviewed_by_user_id = user.id
+    req.reviewed_at = now
+    db.flush()
+
+    # 5. Notify Employee
+    create_notification(
+        db=db,
+        user_id=req.requested_by_user_id,
+        title=f"Leave Request Approved ({req.reason_type})",
+        message=f"Your request for {req.start_date} to {req.end_date} was approved. Any conflicting shifts are being rescheduled.",
+        notification_type="EMPLOYEE_REQUEST_APPROVED",
+        reference_type="employee_availability_request",
+        reference_id=req.id,
+    )
+
+    db.commit()
+    db.refresh(req)
+
+    res = EmployeeAvailabilityRequestRead.model_validate(req)
+    if emp:
+        res.employee_name = emp.name
+    return res
+
+
+@router.post("/requests/{request_id}/reject", response_model=EmployeeAvailabilityRequestRead)
+def reject_employee_request(
+    request_id: UUID,
+    payload: EmployeeReviewActionRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_manager),
+) -> EmployeeAvailabilityRequestRead:
+    """Rejects an employee availability request with mandatory notes."""
+    req = db.get(EmployeeAvailabilityRequest, request_id)
+    if not req:
+        raise AppError("NOT_FOUND", "Request not found.", 404)
+    if req.status in (RequestStatus.APPROVED.value, RequestStatus.IMPLEMENTED.value):
+        raise AppError("CONFLICT", f"Cannot reject request in {req.status} state.", 409)
+
+    notes = payload.manager_notes or payload.notes
+    if not notes or len(notes.strip()) < 3:
+        raise AppError("VALIDATION_ERROR", "Manager review notes are required when rejecting a request.", 422)
+
+    emp = db.get(Employee, req.employee_id)
+    now = datetime.now(timezone.utc)
+
+    req.status = RequestStatus.REJECTED.value
+    req.review_notes = notes
+    req.reviewed_by_user_id = user.id
+    req.reviewed_at = now
+    db.flush()
+
+    create_notification(
+        db=db,
+        user_id=req.requested_by_user_id,
+        title=f"Leave Request Rejected ({req.reason_type})",
+        message=f"Your request for {req.start_date} to {req.end_date} was not approved: {notes}",
+        notification_type="EMPLOYEE_REQUEST_REJECTED",
+        reference_type="employee_availability_request",
+        reference_id=req.id,
+    )
+
+    db.commit()
+    db.refresh(req)
+
+    res = EmployeeAvailabilityRequestRead.model_validate(req)
+    if emp:
+        res.employee_name = emp.name
+    return res
+
+
+@router.post("/requests/{request_id}/mark-implemented", response_model=EmployeeAvailabilityRequestRead)
+def mark_employee_request_implemented(
+    request_id: UUID,
+    roster_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_manager),
+) -> EmployeeAvailabilityRequestRead:
+    """Transitions request to IMPLEMENTED once the affected roster has been resolved and published."""
+    req = db.get(EmployeeAvailabilityRequest, request_id)
+    if not req:
+        raise AppError("NOT_FOUND", "Request not found.", 404)
+
+    emp = db.get(Employee, req.employee_id)
+    roster = None
+    if roster_id:
+        roster = db.get(Roster, roster_id)
+        if not roster or roster.status != RosterStatus.PUBLISHED:
+            raise AppError("BAD_REQUEST", "Target roster must be PUBLISHED to mark request implemented.", 400)
+        req.implemented_roster_id = roster.id
+
+    req.status = RequestStatus.IMPLEMENTED.value
+    db.flush()
+
+    message = (
+        f"Your approved leave schedule is now fully resolved and live in published Roster v{roster.version} ({roster.name})."
+        if roster
+        else "Your approved leave has been implemented in active rosters."
+    )
+
+    create_notification(
+        db=db,
+        user_id=req.requested_by_user_id,
+        title="Leave Schedule Published",
+        message=message,
+        notification_type="ROSTER_PUBLISHED_FOR_EMPLOYEE",
+        reference_type="roster" if roster else "employee_availability_request",
+        reference_id=roster.id if roster else req.id,
+    )
+
+    db.commit()
+    db.refresh(req)
+
+    res = EmployeeAvailabilityRequestRead.model_validate(req)
+    if emp:
+        res.employee_name = emp.name
+    return res

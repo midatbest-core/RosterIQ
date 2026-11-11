@@ -66,6 +66,88 @@ export interface BrandImpactPreview {
   summary: string;
 }
 
+export interface EmployeeProfile {
+  employee_id: string;
+  employee_code: string;
+  name: string;
+  email: string;
+  pod_id?: string | null;
+  pod_name?: string | null;
+  pod_lead_name?: string | null;
+  pod_lead_email?: string | null;
+  daily_capacity_minutes: number;
+  standard_start_time: string;
+  standard_end_time: string;
+  primary_assignments: Array<{
+    assignment_id: string;
+    brand_id?: string | null;
+    brand_name: string;
+    process_id?: string | null;
+    process_name: string;
+    effective_from?: string | null;
+  }>;
+  skills: Array<{
+    process_id: string;
+    process_name: string;
+    proficiency: string;
+  }>;
+}
+
+export interface EmployeeTaskItem {
+  allocation_id: string;
+  roster_id: string;
+  roster_name: string;
+  roster_status: string;
+  date: string;
+  day_of_week: string;
+  start_time: string;
+  end_time: string;
+  brand_name: string;
+  brand_code: string;
+  process_name: string;
+  process_code: string;
+  allocation_type: string;
+  status: string;
+}
+
+export interface EmployeeAvailabilityRequest {
+  id: string;
+  employee_id: string;
+  employee_name?: string | null;
+  requested_by_user_id: string;
+  request_type: string;
+  start_date: string;
+  end_date: string;
+  reason_type: string;
+  notes?: string | null;
+  details?: string | null;
+  status: 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'ROSTER_PENDING' | 'IMPLEMENTED';
+  review_notes?: string | null;
+  reviewed_by_user_id?: string | null;
+  reviewed_at?: string | null;
+  implemented_roster_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmployeeImpactPreview {
+  request_id: string;
+  employee_id: string;
+  employee_name: string;
+  request_type: string;
+  dates: string[];
+  conflicting_allocations_count: number;
+  conflicting_allocations: Array<{
+    allocation_id: string;
+    date: string;
+    time: string;
+    brand: string;
+    process: string;
+  }>;
+  requires_reassignment: boolean;
+  summary: string;
+}
+
 export interface Pod {
   id: string;
   name: string;
