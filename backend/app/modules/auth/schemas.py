@@ -19,6 +19,9 @@ class UserRead(BaseModel):
     id: UUID
     email: EmailStr
     role: UserRole
+    brand_id: UUID | None = None
+    employee_id: UUID | None = None
+    pod_id: UUID | None = None
     is_active: bool
     last_login_at: datetime | None
 

@@ -62,3 +62,64 @@ def logout(response: Response) -> None:
 def me(user: User = Depends(get_current_user)) -> User:
     return user
 
+
+@router.get("/demo-accounts")
+def get_demo_accounts(db: Session = Depends(get_db)) -> dict:
+    """Returns local demonstration accounts grouped by role, pod, and brand. Only available in local/demo mode."""
+    settings = get_settings()
+    if settings.environment != "development":
+        raise AppError("FORBIDDEN", "Demo accounts directory is disabled in production.", 403)
+
+    from app.modules.workforce.models import Employee, Pod
+    from app.modules.operations.models import Brand
+
+    users = db.scalars(select(User).where(User.is_active == True)).all()
+    emp_map = {e.id: e for e in db.scalars(select(Employee)).all()}
+    pod_map = {p.id: p for p in db.scalars(select(Pod)).all()}
+    brand_map = {b.id: b for b in db.scalars(select(Brand)).all()}
+
+    admins = []
+    ops = []
+    leads = []
+    brands = []
+    employees_by_pod: dict[str, list[dict]] = {}
+
+    for u in users:
+        emp = emp_map.get(u.employee_id) if u.employee_id else None
+        b = brand_map.get(u.brand_id) if u.brand_id else None
+        p = pod_map.get(u.pod_id) if u.pod_id else (pod_map.get(emp.pod_id) if emp and emp.pod_id else None)
+        pod_name = p.name if p else "Unassigned Pod"
+
+        item = {
+            "id": str(u.id),
+            "email": u.email,
+            "role": u.role.value if hasattr(u.role, "value") else str(u.role),
+            "name": emp.name if emp else (b.name if b else u.email.split("@")[0].title()),
+            "brand_id": str(u.brand_id) if u.brand_id else None,
+            "brand_name": b.name if b else None,
+            "employee_id": str(u.employee_id) if u.employee_id else None,
+            "pod_id": str(p.id) if p else None,
+            "pod_name": pod_name,
+        }
+
+        role_str = u.role.value if hasattr(u.role, "value") else str(u.role)
+        if role_str == "ADMIN":
+            admins.append(item)
+        elif role_str == "OPERATIONS_MANAGER":
+            ops.append(item)
+        elif role_str == "POD_LEAD":
+            leads.append(item)
+        elif role_str == "BRAND_USER":
+            brands.append(item)
+        elif role_str == "EMPLOYEE":
+            employees_by_pod.setdefault(pod_name, []).append(item)
+
+    return {
+        "admins": admins,
+        "operations_managers": ops,
+        "pod_leads": leads,
+        "brand_users": sorted(brands, key=lambda x: x["name"] or ""),
+        "employees_by_pod": {k: sorted(v, key=lambda x: x["name"]) for k, v in employees_by_pod.items()},
+    }
+
+

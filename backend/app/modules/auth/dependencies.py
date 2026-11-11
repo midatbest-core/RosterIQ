@@ -46,4 +46,26 @@ def verify_csrf(request: Request) -> None:
 
 require_manager = require_roles(UserRole.ADMIN, UserRole.OPERATIONS_MANAGER)
 require_admin = require_roles(UserRole.ADMIN)
+require_lead_or_manager = require_roles(UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.POD_LEAD)
+require_brand_user = require_roles(UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.BRAND_USER)
+require_employee_user = require_roles(UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.POD_LEAD, UserRole.EMPLOYEE)
+
+
+def check_brand_scope(user: User, brand_id: UUID) -> None:
+    """Enforces tenant isolation: brand users can only view or manage their own brand."""
+    if user.role == UserRole.BRAND_USER and user.brand_id != brand_id:
+        raise AppError("FORBIDDEN", "You are not authorized to view or modify other brand data.", 403)
+
+
+def check_employee_scope(user: User, employee_id: UUID) -> None:
+    """Enforces employee isolation: employees can only view or submit requests for themselves."""
+    if user.role == UserRole.EMPLOYEE and user.employee_id != employee_id:
+        raise AppError("FORBIDDEN", "You are not authorized to access another employee's records.", 403)
+
+
+def check_pod_scope(user: User, pod_id: UUID) -> None:
+    """Enforces pod boundary isolation: Pod Leads can only view resources within their pod."""
+    if user.role == UserRole.POD_LEAD and user.pod_id != pod_id:
+        raise AppError("FORBIDDEN", "Pod Leads are restricted to their assigned pod.", 403)
+
 

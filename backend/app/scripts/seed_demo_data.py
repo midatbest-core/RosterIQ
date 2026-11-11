@@ -362,8 +362,79 @@ def seed_data() -> None:
                     )
                 )
 
+        # 9. Multi-Role Demo User Accounts
+        # Second Operations Manager
+        ops2 = db.scalar(select(User).where(User.email == "ops2@example.com"))
+        if not ops2:
+            ops2 = User(
+                email="ops2@example.com",
+                password_hash=hash_password("OpsManager123!"),
+                role=UserRole.OPERATIONS_MANAGER,
+            )
+            db.add(ops2)
+
+        # Pod Leads (4 Accounts)
+        pod_leads = db.scalars(select(PodLead)).all()
+        for pl in pod_leads:
+            p_rec = db.get(Pod, pl.pod_id)
+            pod_slug = p_rec.name.split("-")[0].strip().replace(" ", "").lower() if p_rec else "lead"
+            lead_email = f"{pod_slug}.lead@example.com"
+            u_lead = db.scalar(select(User).where(User.email == lead_email))
+            if not u_lead:
+                u_lead = User(
+                    email=lead_email,
+                    password_hash=hash_password("PodLeadPass123!"),
+                    role=UserRole.POD_LEAD,
+                    pod_id=pl.pod_id,
+                    employee_id=pl.employee_id,
+                )
+                db.add(u_lead)
+            else:
+                u_lead.role = UserRole.POD_LEAD
+                u_lead.pod_id = pl.pod_id
+                u_lead.employee_id = pl.employee_id
+
+        # Brand Users (15 Accounts)
+        all_brands = db.scalars(select(Brand)).all()
+        for b in all_brands:
+            b_code = b.code.lower().replace("_", "").replace("-", "")
+            brand_email = f"brand.{b_code}@example.com"
+            u_brand = db.scalar(select(User).where(User.email == brand_email))
+            if not u_brand:
+                u_brand = User(
+                    email=brand_email,
+                    password_hash=hash_password("BrandPass123!"),
+                    role=UserRole.BRAND_USER,
+                    brand_id=b.id,
+                )
+                db.add(u_brand)
+            else:
+                u_brand.role = UserRole.BRAND_USER
+                u_brand.brand_id = b.id
+
+        # Employee Users (All 36 Active Employees)
+        all_emps = db.scalars(select(Employee)).all()
+        for emp in all_emps:
+            emp_email = emp.email.lower()
+            u_emp = db.scalar(select(User).where(User.email == emp_email))
+            if not u_emp:
+                u_emp = User(
+                    email=emp_email,
+                    password_hash=hash_password("EmployeePass123!"),
+                    role=UserRole.EMPLOYEE,
+                    employee_id=emp.id,
+                    pod_id=emp.pod_id,
+                )
+                db.add(u_emp)
+            else:
+                if u_emp.role not in (UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.POD_LEAD):
+                    u_emp.role = UserRole.EMPLOYEE
+                u_emp.employee_id = emp.id
+                u_emp.pod_id = emp.pod_id
+
         db.commit()
-        print("✅ Seed data generation complete: 32 employees, 4 pods, 15 brands (12 single-resource, 3 multi-resource), operating patterns, overrides, and leaves initialized.")
+        print("✅ Seed data generation complete: multi-role demo users (Admin, 2 Ops Managers, 4 Pod Leads, 15 Brand Users, 36 Employees) seeded.")
+
 
 
 if __name__ == "__main__":

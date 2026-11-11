@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -13,6 +13,9 @@ from app.db.base import Base
 class UserRole(str, enum.Enum):
     ADMIN = "ADMIN"
     OPERATIONS_MANAGER = "OPERATIONS_MANAGER"
+    POD_LEAD = "POD_LEAD"
+    BRAND_USER = "BRAND_USER"
+    EMPLOYEE = "EMPLOYEE"
 
 
 class User(Base):
@@ -24,6 +27,15 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, native_enum=False, length=40),
         index=True,
+    )
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("brands.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    pod_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("pods.id", ondelete="SET NULL"), nullable=True, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
