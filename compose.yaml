@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rosteriq
+      POSTGRES_USER: rosteriq
+      POSTGRES_PASSWORD: rosteriq
+    ports:
+      - "5432:5432"
+    volumes:
+      - rosteriq-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rosteriq -d rosteriq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  rosteriq-postgres:
+
