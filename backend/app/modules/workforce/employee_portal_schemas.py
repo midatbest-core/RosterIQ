@@ -84,3 +84,4 @@ class EmployeeImpactPreview(BaseModel):
     conflicting_allocations: list[dict]
     requires_reassignment: bool
     summary: str
+

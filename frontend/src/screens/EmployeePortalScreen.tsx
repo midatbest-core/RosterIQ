@@ -528,3 +528,4 @@ export const EmployeePortalScreen: React.FC = () => {
   );
 };
 export default EmployeePortalScreen;
+

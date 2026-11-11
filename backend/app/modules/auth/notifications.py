@@ -60,3 +60,4 @@ def notify_managers(
         )
         created.append(n)
     return created
+
