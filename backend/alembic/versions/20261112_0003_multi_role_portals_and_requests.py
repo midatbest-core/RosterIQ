@@ -117,3 +117,4 @@ def downgrade() -> None:
         batch_op.drop_column("pod_id")
         batch_op.drop_column("employee_id")
         batch_op.drop_column("brand_id")
+

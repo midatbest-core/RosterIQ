@@ -219,4 +219,43 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  // Brand Portal
+  getBrandProfile: () => request<import('./types').BrandProfile>('/brand-portal/me'),
+  submitBrandRequest: (data: {
+    brand_process_id?: string;
+    operating_mode: string;
+    custom_days_of_week?: string[];
+    operating_start_time: string;
+    operating_end_time: string;
+    min_headcount: number;
+    effective_from_date?: string;
+    effective_to_date?: string;
+    notes?: string;
+  }) =>
+    request<import('./types').BrandChangeRequest>('/brand-portal/requests', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getBrandRequests: () => request<import('./types').BrandChangeRequest[]>('/brand-portal/requests'),
+  getBrandRequestDetail: (requestId: string) =>
+    request<import('./types').BrandChangeRequest>(`/brand-portal/requests/${requestId}`),
+  previewBrandRequestImpact: (requestId: string, rosterId?: string) => {
+    let url = `/brand-portal/requests/${requestId}/preview-impact`;
+    if (rosterId) url += `?roster_id=${rosterId}`;
+    return request<import('./types').BrandImpactPreview>(url, { method: 'POST' });
+  },
+  approveBrandRequest: (requestId: string, managerNotes?: string) =>
+    request<import('./types').BrandChangeRequest>(`/brand-portal/requests/${requestId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ manager_notes: managerNotes }),
+    }),
+  rejectBrandRequest: (requestId: string, managerNotes: string) =>
+    request<import('./types').BrandChangeRequest>(`/brand-portal/requests/${requestId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ manager_notes: managerNotes }),
+    }),
+  markBrandRequestImplemented: (requestId: string) =>
+    request<import('./types').BrandChangeRequest>(`/brand-portal/requests/${requestId}/mark-implemented`, {
+      method: 'POST',
+    }),
 };

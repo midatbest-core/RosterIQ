@@ -15,6 +15,7 @@ class RequestStatus(str, enum.Enum):
     UNDER_REVIEW = "UNDER_REVIEW"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    ROSTER_PENDING = "ROSTER_PENDING"
     IMPLEMENTED = "IMPLEMENTED"
 
 
@@ -47,3 +48,4 @@ class EmployeeAvailabilityRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+

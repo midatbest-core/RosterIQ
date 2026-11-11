@@ -12,6 +12,7 @@ import { WorkforceScreen } from './screens/WorkforceScreen';
 import { OperationsScreen } from './screens/OperationsScreen';
 import { AuditHistoryScreen } from './screens/AuditHistoryScreen';
 import { LoginScreen } from './screens/LoginScreen';
+import { BrandPortalScreen } from './screens/BrandPortalScreen';
 import { GenerateRosterModal } from './components/roster/GenerateRosterModal';
 import { Activity } from 'lucide-react';
 
@@ -82,6 +83,40 @@ export const App: React.FC = () => {
           await loadRosters();
         }}
       />
+    );
+  }
+
+  // Brand User view
+  if (currentUser.role === 'BRAND_USER') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+        <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
+              R
+            </div>
+            <div>
+              <h1 className="font-bold text-white text-base leading-tight">RosterIQ</h1>
+              <p className="text-[11px] text-slate-400">Brand Partner Self-Service Portal</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-xs font-semibold text-white">{currentUser.email}</p>
+              <p className="text-[11px] text-slate-400 capitalize">{currentUser.role.replace('_', ' ')}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-rose-400 border border-slate-700 transition-colors"
+            >
+              Sign Out
+            </button>
+          </div>
+        </header>
+        <main className="flex-1">
+          <BrandPortalScreen />
+        </main>
+      </div>
     );
   }
 

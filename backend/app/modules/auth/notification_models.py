@@ -23,3 +23,4 @@ class Notification(Base):
     reference_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+

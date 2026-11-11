@@ -1,8 +1,69 @@
 export interface User {
   id: string;
   email: string;
-  role: 'ADMIN' | 'OPERATIONS_MANAGER';
+  role: 'ADMIN' | 'OPERATIONS_MANAGER' | 'POD_LEAD' | 'BRAND_USER' | 'EMPLOYEE';
+  brand_id?: string | null;
+  employee_id?: string | null;
+  pod_id?: string | null;
   is_active: boolean;
+}
+
+export interface BrandProfileProcess {
+  brand_process_id: string;
+  process_id: string;
+  process_name: string;
+  operating_days: number[];
+  start_time: string;
+  end_time: string;
+  min_staffing_weekday: number;
+  min_staffing_weekend: number;
+  holiday_behavior: string;
+}
+
+export interface BrandProfile {
+  brand_id: string;
+  code: string;
+  name: string;
+  timezone: string;
+  processes: BrandProfileProcess[];
+  active_overrides_count: number;
+}
+
+export interface BrandChangeRequest {
+  id: string;
+  brand_id: string;
+  brand_name?: string;
+  brand_process_id?: string | null;
+  process_name?: string;
+  requested_by_user_id: string;
+  requested_by_email?: string;
+  request_type: string;
+  current_configuration: string;
+  requested_configuration: string;
+  status: 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'ROSTER_PENDING' | 'IMPLEMENTED';
+  review_notes?: string | null;
+  reviewed_by_user_id?: string | null;
+  reviewed_at?: string | null;
+  implemented_roster_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BrandImpactPreview {
+  request_id: string;
+  brand_id: string;
+  brand_name: string;
+  request_type: string;
+  affected_dates: string[];
+  affected_processes: string[];
+  old_requirement: string;
+  new_requirement: string;
+  affected_employees_count: number;
+  affected_employees: Array<{ id: string; name: string; date?: string }>;
+  invalid_existing_allocations_count: number;
+  new_uncovered_intervals_count: number;
+  affected_draft_rosters: Array<{ id: string; name: string; status: string }>;
+  summary: string;
 }
 
 export interface Pod {

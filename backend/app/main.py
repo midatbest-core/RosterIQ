@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.modules.auth.router import router as auth_router
 from app.modules.operations.router import router as operations_router
+from app.modules.operations.brand_portal_router import router as brand_portal_router
 from app.modules.roster.router import router as roster_router
 from app.modules.workforce.router import router as workforce_router
 
@@ -29,6 +30,7 @@ register_error_handlers(app)
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(workforce_router, prefix="/api/v1")
 app.include_router(operations_router, prefix="/api/v1")
+app.include_router(brand_portal_router, prefix="/api/v1")
 app.include_router(roster_router, prefix="/api/v1")
 
 
