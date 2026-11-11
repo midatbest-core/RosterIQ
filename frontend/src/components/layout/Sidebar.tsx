@@ -21,6 +21,7 @@ import {
 export type NavTab =
   | 'dashboard'
   | 'analytics'
+  | 'requests'
   | 'roster'
   | 'conflicts'
   | 'allocation-log'
@@ -60,6 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       group: 'SCHEDULING',
       items: [
+        { id: 'requests' as NavTab, label: 'Requests & Approvals', icon: FileText },
         { id: 'roster' as NavTab, label: 'Roster Calendar', icon: Calendar },
         {
           id: 'conflicts' as NavTab,

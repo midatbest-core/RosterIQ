@@ -14,6 +14,7 @@ import { AuditHistoryScreen } from './screens/AuditHistoryScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { BrandPortalScreen } from './screens/BrandPortalScreen';
 import { EmployeePortalScreen } from './screens/EmployeePortalScreen';
+import { RequestsCenterScreen } from './screens/RequestsCenterScreen';
 import { GenerateRosterModal } from './components/roster/GenerateRosterModal';
 import { Activity } from 'lucide-react';
 
@@ -184,6 +185,15 @@ export const App: React.FC = () => {
           rosters={rosters}
           selectedRosterId={selectedRosterId}
           onNavigateTab={setActiveTab}
+        />
+      )}
+
+      {activeTab === 'requests' && (
+        <RequestsCenterScreen
+          rosters={rosters}
+          selectedRosterId={selectedRosterId}
+          onRefreshRosters={loadRosters}
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
         />
       )}
 
