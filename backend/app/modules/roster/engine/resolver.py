@@ -578,7 +578,11 @@ class AutomatedConflictResolver:
                 off_day_work_vars.append(y_var)
         pref_penalty_expr = sum(off_day_work_vars) if off_day_work_vars else 0
 
-        stage_budget = max(0.5, time_limit_seconds / 5.0)
+        # Adapt stage budget dynamically based on available time:
+        # Give Stage 1 (coverage) and Stage 4 (churn minimization) higher proportional budgets
+        # to ensure feasible continuity and prevent timeout churn.
+        total_budget = max(2.0, time_limit_seconds)
+        stage_budget = max(1.0, total_budget / 4.0)
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = float(stage_budget)
         solver.parameters.num_workers = 4
