@@ -63,7 +63,53 @@ def me(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+@router.get("/notifications")
+def list_notifications(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Returns the authenticated user's notifications sorted newest first."""
+    from app.modules.auth.notification_models import Notification
+    notifs = db.scalars(
+        select(Notification)
+        .where(Notification.user_id == user.id)
+        .order_by(Notification.created_at.desc())
+        .limit(50)
+    ).all()
+    return [
+        {
+            "id": str(n.id),
+            "title": n.title,
+            "message": n.message,
+            "notification_type": n.notification_type,
+            "reference_type": n.reference_type,
+            "reference_id": str(n.reference_id) if n.reference_id else None,
+            "is_read": n.is_read,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in notifs
+    ]
+
+
+@router.post("/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Marks a notification as read."""
+    from app.modules.auth.notification_models import Notification
+    import uuid
+    notif = db.get(Notification, uuid.UUID(notification_id))
+    if not notif or notif.user_id != user.id:
+        raise AppError("NOT_FOUND", "Notification not found.", 404)
+    notif.is_read = True
+    db.commit()
+    return {"status": "ok"}
+
+
 @router.get("/demo-accounts")
+
 def get_demo_accounts(db: Session = Depends(get_db)) -> dict:
     """Returns local demonstration accounts grouped by role, pod, and brand. Only available in local/demo mode."""
     settings = get_settings()
