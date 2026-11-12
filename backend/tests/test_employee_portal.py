@@ -86,6 +86,30 @@ def test_employee_portal_scoping_and_workflow(client: TestClient, db_session: Se
         pod_id=pod_a.id,
         is_active=True,
     )
+    u_lead_b = User(
+        id=uuid.uuid4(),
+        email=f"lead_b_{uuid.uuid4().hex[:6]}@rosteriq.io",
+        password_hash=pwd,
+        role=UserRole.POD_LEAD,
+        employee_id=emp_bob.id,
+        pod_id=pod_b.id,
+        is_active=True,
+    )
+    u_admin = User(
+        id=uuid.uuid4(),
+        email=f"admin_{uuid.uuid4().hex[:6]}@rosteriq.io",
+        password_hash=pwd,
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    u_brand = User(
+        id=uuid.uuid4(),
+        email=f"brand_{uuid.uuid4().hex[:6]}@example.com",
+        password_hash=pwd,
+        role=UserRole.BRAND_USER,
+        brand_id=brand.id if 'brand' in locals() else None,
+        is_active=True,
+    )
     u_mgr = User(
         id=uuid.uuid4(),
         email=f"mgr_{uuid.uuid4().hex[:6]}@rosteriq.io",
@@ -93,7 +117,7 @@ def test_employee_portal_scoping_and_workflow(client: TestClient, db_session: Se
         role=UserRole.OPERATIONS_MANAGER,
         is_active=True,
     )
-    db_session.add_all([u_alice, u_bob, u_lead, u_mgr])
+    db_session.add_all([u_alice, u_bob, u_lead, u_lead_b, u_admin, u_mgr])
 
     # Roster & Allocation for Alice
     brand = Brand(id=uuid.uuid4(), name=f"Brand {uuid.uuid4().hex[:4]}", code=f"B_{uuid.uuid4().hex[:4]}")
@@ -194,17 +218,32 @@ def test_employee_portal_scoping_and_workflow(client: TestClient, db_session: Se
     resp = client.get(f"/api/v1/employee-portal/requests/{req_id}")
     assert resp.status_code == 403
 
-    # Pod Lead logs in (same pod as Alice) -> can view request
+    # Pod Lead B (different pod than Alice) -> cannot view Alice's request (403 Forbidden)
+    client.post("/api/v1/auth/login", json={"email": u_lead_b.email, "password": "Pass1234!"})
+    resp = client.get(f"/api/v1/employee-portal/requests/{req_id}")
+    assert resp.status_code == 403
+    assert "Pod Leads are restricted to their assigned pod" in (resp.json().get("error", {}).get("message") or "")
+
+    # Pod Lead B cannot preview impact for Alice (403 Forbidden)
+    resp = client.post(f"/api/v1/employee-portal/requests/{req_id}/preview-impact", headers=csrf_headers(client))
+    assert resp.status_code == 403
+
+    # Pod Lead A logs in (same pod as Alice) -> can view request (200 OK)
     client.post("/api/v1/auth/login", json={"email": emp_lead.email, "password": "Pass1234!"})
     resp = client.get(f"/api/v1/employee-portal/requests/{req_id}")
     assert resp.status_code == 200
 
-    # Pod Lead previews impact
+    # Pod Lead A previews impact for Alice (200 OK)
     resp = client.post(f"/api/v1/employee-portal/requests/{req_id}/preview-impact", headers=csrf_headers(client))
     assert resp.status_code == 200
     preview = resp.json()
     assert preview["conflicting_allocations_count"] == 1
     assert preview["requires_reassignment"] is True
+
+    # Admin user -> can view Alice's request (200 OK)
+    client.post("/api/v1/auth/login", json={"email": u_admin.email, "password": "Pass1234!"})
+    resp = client.get(f"/api/v1/employee-portal/requests/{req_id}")
+    assert resp.status_code == 200
 
     # 6. Operations Manager logs in and approves request
     client.post("/api/v1/auth/login", json={"email": u_mgr.email, "password": "Pass1234!"})

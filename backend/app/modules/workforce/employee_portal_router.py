@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.core.errors import AppError
 from app.modules.auth.dependencies import (
     check_employee_scope,
+    check_pod_scope,
     get_current_user,
     require_employee_user,
     require_lead_or_manager,
@@ -277,12 +278,17 @@ def get_employee_request(
     if not req:
         raise AppError("NOT_FOUND", "Request not found.", 404)
 
-    check_employee_scope(user, req.employee_id)
-
     emp = db.get(Employee, req.employee_id)
+    if not emp:
+        raise AppError("NOT_FOUND", "Employee not found.", 404)
+
+    # Scoping checks
+    check_employee_scope(user, req.employee_id)
+    if emp.pod_id:
+        check_pod_scope(user, emp.pod_id)
+
     res = EmployeeAvailabilityRequestRead.model_validate(req)
-    if emp:
-        res.employee_name = emp.name
+    res.employee_name = emp.name
     return res
 
 
@@ -300,6 +306,9 @@ def preview_employee_request_impact(
     emp = db.get(Employee, req.employee_id)
     if not emp:
         raise AppError("NOT_FOUND", "Employee not found.", 404)
+
+    if emp.pod_id:
+        check_pod_scope(user, emp.pod_id)
 
     # Dates range
     curr = req.start_date
