@@ -23,7 +23,16 @@ import {
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const BASE_URL = `${API_BASE}/api/v1`;
 
+let inMemoryCsrfToken = '';
+
 function getCsrfToken(): string {
+  if (inMemoryCsrfToken) return inMemoryCsrfToken;
+  try {
+    const stored = sessionStorage.getItem('rosteriq_csrf_token');
+    if (stored) return stored;
+  } catch {
+    // ignore sessionStorage access errors in restricted contexts
+  }
   const match = document.cookie.match(new RegExp('(^| )csrf_token=([^;]+)'));
   return match ? match[2] : '';
 }
@@ -68,12 +77,27 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
+    if (typeof res === 'object' && res !== null && 'csrf_token' in res && (res as any).csrf_token) {
+      inMemoryCsrfToken = (res as any).csrf_token;
+      try {
+        sessionStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
+      } catch {}
+    }
     return (res as any).user ? (res as any).user : (res as User);
   },
   getPresentationDemoAccounts: () =>
     request<PresentationDemoAccount[]>('/auth/presentation-demo-accounts'),
   getCurrentUser: () => request<User>('/auth/me'),
-  logout: () => request<{ message: string }>('/auth/logout', { method: 'POST' }),
+  logout: async () => {
+    try {
+      await request<{ message: string }>('/auth/logout', { method: 'POST' });
+    } finally {
+      inMemoryCsrfToken = '';
+      try {
+        sessionStorage.removeItem('rosteriq_csrf_token');
+      } catch {}
+    }
+  },
   getNotifications: () => request<AppNotification[]>('/auth/notifications'),
   markNotificationRead: (id: string) =>
     request<{ status: string }>(`/auth/notifications/${id}/read`, { method: 'POST' }),

@@ -21,7 +21,23 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = Field(default=60, ge=5, le=1440)
     cookie_secure: bool = False
+    cookie_samesite: str = ""
     cors_origins: list[str] | str = ["http://localhost:5173"]
+
+    @property
+    def effective_cookie_samesite(self) -> str:
+        """Returns the appropriate SameSite attribute.
+        
+        When cookie_secure is True (HTTPS), defaults to 'none' for cross-domain SPA deployments (e.g. Vercel -> Render).
+        When cookie_secure is False (local HTTP), defaults to 'lax' since browsers reject SameSite=None on HTTP.
+        """
+        if not self.cookie_secure:
+            return "lax"
+        if self.cookie_samesite:
+            s = self.cookie_samesite.strip().lower()
+            if s in ("lax", "strict", "none"):
+                return s
+        return "none"
 
     @field_validator("cors_origins", mode="before")
     @classmethod

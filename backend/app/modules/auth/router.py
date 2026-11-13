@@ -34,12 +34,13 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     settings = get_settings()
     access_token = create_access_token(user.id, user.role.value)
     csrf_token = new_csrf_token()
+    samesite_val = settings.effective_cookie_samesite
     response.set_cookie(
         "access_token",
         access_token,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=samesite_val,
         max_age=settings.access_token_minutes * 60,
         path="/",
     )
@@ -48,7 +49,7 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
         csrf_token,
         httponly=False,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=samesite_val,
         max_age=settings.access_token_minutes * 60,
         path="/",
     )
@@ -57,8 +58,20 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
 
 @router.post("/logout", status_code=204, dependencies=[Depends(verify_csrf)])
 def logout(response: Response) -> None:
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("csrf_token", path="/")
+    settings = get_settings()
+    samesite_val = settings.effective_cookie_samesite
+    response.delete_cookie(
+        "access_token",
+        path="/",
+        secure=settings.cookie_secure,
+        samesite=samesite_val,
+    )
+    response.delete_cookie(
+        "csrf_token",
+        path="/",
+        secure=settings.cookie_secure,
+        samesite=samesite_val,
+    )
 
 
 @router.get("/me", response_model=UserRead)
@@ -319,13 +332,39 @@ def get_presentation_demo_accounts() -> list[dict[str, str]]:
                 accounts.append(current_account)
 
     # Fallback to demo_credentials_json if running on hosted container without local file
-    if not accounts and settings.demo_credentials_json:
-        try:
-            parsed = json.loads(settings.demo_credentials_json)
+    if not accounts:
+        raw_json = (
+            settings.demo_credentials_json
+            or os.environ.get("ROSTERIQ_DEMO_CREDENTIALS_JSON", "")
+            or os.environ.get("DEMO_CREDENTIALS_JSON", "")
+        )
+        if raw_json and raw_json.strip():
+            raw_stripped = raw_json.strip()
+            parsed = None
+            try:
+                parsed = json.loads(raw_stripped)
+            except Exception:
+                try:
+                    import ast
+
+                    parsed = ast.literal_eval(raw_stripped)
+                except Exception:
+                    pass
+
+            # Handle double-stringified JSON (e.g. pasted into cloud dashboard with outer quotes)
+            if isinstance(parsed, str):
+                try:
+                    parsed = json.loads(parsed.strip())
+                except Exception:
+                    try:
+                        import ast
+
+                        parsed = ast.literal_eval(parsed.strip())
+                    except Exception:
+                        pass
+
             if isinstance(parsed, list):
-                accounts = parsed
-        except Exception:
-            pass
+                accounts = [item for item in parsed if isinstance(item, dict)]
 
     if not accounts:
         raise AppError(
@@ -333,6 +372,11 @@ def get_presentation_demo_accounts() -> list[dict[str, str]]:
             message="No staging demo credentials configured.",
             status_code=404,
         )
+
+    # Ensure role_name is populated
+    for acc in accounts:
+        if "role" in acc and not acc.get("role_name"):
+            acc["role_name"] = role_display_names.get(acc["role"], acc["role"])
 
     order = ["ADMIN", "OPERATIONS_MANAGER", "POD_LEAD", "BRAND_USER", "EMPLOYEE"]
     account_map = {a.get("role"): a for a in accounts}
