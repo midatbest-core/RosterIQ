@@ -553,4 +553,47 @@ def demo_login(
     return LoginResponse(user=UserRead.model_validate(user), csrf_token=csrf_token)
 
 
+@router.get("/quick-login-accounts")
+def get_quick_login_accounts(db: Session = Depends(get_db)) -> dict:
+    from app.modules.workforce.models import Employee, Pod
+    from app.modules.operations.models import Brand
+
+    employees = db.scalars(
+        select(Employee).where(Employee.status == "ACTIVE").order_by(Employee.name)
+    ).all()
+    pod_map = {p.id: p.name for p in db.scalars(select(Pod)).all()}
+
+    emp_list = []
+    for emp in employees:
+        pod_name = pod_map.get(emp.pod_id, "Unassigned Pod")
+        emp_list.append({
+            "id": str(emp.id),
+            "name": emp.name,
+            "employee_code": emp.employee_code,
+            "email": emp.email,
+            "password": "EmployeePass123!",
+            "pod_name": pod_name,
+            "role": "EMPLOYEE",
+        })
+
+    brands = db.scalars(select(Brand).where(Brand.status == "ACTIVE").order_by(Brand.name)).all()
+    brand_list = []
+    for b in brands:
+        b_clean = b.code.lower().replace("_", "").replace("-", "")
+        brand_list.append({
+            "id": str(b.id),
+            "name": b.name,
+            "code": b.code,
+            "email": f"brand.{b_clean}@example.com",
+            "password": "BrandPass123!",
+            "role": "BRAND_USER",
+        })
+
+    return {
+        "employees": emp_list,
+        "brands": brand_list,
+    }
+
+
+
 

@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import AppError
+from app.core.security import hash_password
 from app.db.session import get_db
 from app.modules.auth.dependencies import require_lead_or_manager, require_manager, verify_csrf
 from app.modules.auth.models import User, UserRole
@@ -173,6 +174,28 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db)) -> E
     db.add(employee)
     db.commit()
     db.refresh(employee)
+
+    # Provision User credentials for the newly created employee
+    temp_pass = "EmployeePass123!"
+    user = db.scalar(select(User).where(User.email == employee.email))
+    if not user:
+        user = User(
+            email=employee.email,
+            password_hash=hash_password(temp_pass),
+            role=UserRole.EMPLOYEE,
+            employee_id=employee.id,
+            pod_id=employee.pod_id,
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+    else:
+        user.employee_id = employee.id
+        user.pod_id = employee.pod_id
+        db.commit()
+
+    employee.temporary_password = temp_pass
+    employee.login_email = employee.email
     return employee
 
 
@@ -193,6 +216,9 @@ def update_employee(employee_id: UUID, payload: EmployeeUpdate, db: Session = De
     data = payload.model_dump(exclude_unset=True)
     if "pod_id" in data:
         validate_pod(db, data["pod_id"])
+        user = db.scalar(select(User).where(User.employee_id == employee.id))
+        if user:
+            user.pod_id = data["pod_id"]
     if data.get("employee_code"):
         data["employee_code"] = data["employee_code"].upper()
     if data.get("email"):

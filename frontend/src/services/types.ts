@@ -186,6 +186,8 @@ export interface Employee {
   daily_capacity_minutes: number;
   standard_start_time: string;
   standard_end_time: string;
+  temporary_password?: string;
+  login_email?: string;
 }
 
 export interface ProcessItem {
@@ -201,6 +203,35 @@ export interface Brand {
   code: string;
   name: string;
   status: 'ACTIVE' | 'INACTIVE';
+  temporary_password?: string;
+  login_email?: string;
+}
+
+export interface ValidationErrorDetail {
+  field: string;
+  fieldLabel: string;
+  reason: string;
+  providedValue?: any;
+}
+
+export interface CreatedCredentials {
+  name: string;
+  email: string;
+  role: string;
+  temporaryPassword: string;
+  podName?: string;
+  code?: string;
+}
+
+export interface QuickLoginAccount {
+  id: string;
+  name: string;
+  employee_code?: string;
+  code?: string;
+  email: string;
+  password: string;
+  role: string;
+  pod_name?: string;
 }
 
 export interface BrandProcess {

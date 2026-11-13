@@ -25,6 +25,8 @@ class BrandRead(BrandCreate):
 
     id: UUID
     status: RecordStatus
+    temporary_password: str | None = None
+    login_email: str | None = None
 
 
 class ProcessCreate(BaseModel):

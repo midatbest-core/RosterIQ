@@ -9,8 +9,10 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.core.security import hash_password
 from app.db.session import get_db
 from app.modules.auth.dependencies import require_lead_or_manager, require_manager, verify_csrf
+from app.modules.auth.models import User, UserRole
 from app.modules.operations.models import (
     Brand,
     BrandProcess,
@@ -66,6 +68,28 @@ def create_brand(payload: BrandCreate, db: Session = Depends(get_db)) -> Brand:
     db.add(brand)
     db.commit()
     db.refresh(brand)
+
+    # Provision Brand User login credentials
+    clean_code = brand.code.lower().replace("_", "").replace("-", "")
+    brand_email = f"brand.{clean_code}@example.com"
+    temp_pass = "BrandPass123!"
+    user = db.scalar(select(User).where(User.email == brand_email))
+    if not user:
+        user = User(
+            email=brand_email,
+            password_hash=hash_password(temp_pass),
+            role=UserRole.BRAND_USER,
+            brand_id=brand.id,
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+    else:
+        user.brand_id = brand.id
+        db.commit()
+
+    brand.temporary_password = temp_pass
+    brand.login_email = brand_email
     return brand
 
 

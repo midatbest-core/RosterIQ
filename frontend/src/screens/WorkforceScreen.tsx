@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
-import { Employee, Pod, EmployeeUnavailability, User } from '../services/types';
+import { api, ApiError } from '../services/api';
+import { Employee, Pod, EmployeeUnavailability, User, ValidationErrorDetail, CreatedCredentials } from '../services/types';
 import { Modal } from '../components/common/Modal';
 import { DetailDrawer } from '../components/layout/DetailDrawer';
 import { StatusBadge } from '../components/common/StatusBadge';
+import { ValidationErrorPopupModal } from '../components/common/ValidationErrorPopupModal';
+import { DistributeCredentialsModal } from '../components/common/DistributeCredentialsModal';
 import {
   Users,
   Network,
@@ -18,6 +20,7 @@ import {
   Trash2,
   Briefcase,
   Sliders,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 interface WorkforceScreenProps {
@@ -64,6 +67,22 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   >('PLANNED_LEAVE');
   const [leaveNotes, setLeaveNotes] = useState('');
 
+  // Validation Error Popup State
+  const [validationErrors, setValidationErrors] = useState<ValidationErrorDetail[]>([]);
+  const [showValidationPopup, setShowValidationPopup] = useState(false);
+  const [validationFallbackMsg, setValidationFallbackMsg] = useState('');
+
+  // Credentials Distribution State
+  const [createdCreds, setCreatedCreds] = useState<CreatedCredentials | null>(null);
+  const [showCredsModal, setShowCredsModal] = useState(false);
+
+  // Pod Relocation State
+  const [relocatingEmp, setRelocatingEmp] = useState<Employee | null>(null);
+  const [targetPodId, setTargetPodId] = useState<string>('');
+  const [showRelocateModal, setShowRelocateModal] = useState(false);
+  const [isRelocating, setIsRelocating] = useState(false);
+  const [drawerPodTarget, setDrawerPodTarget] = useState<string>('');
+
   useEffect(() => {
     loadWorkforceData();
   }, []);
@@ -87,10 +106,11 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
     e.preventDefault();
     try {
       setLoading(true);
-      await api.createEmployee({
-        employee_code: empCode,
-        name: empName,
-        email: empEmail,
+      setError(null);
+      const created = await api.createEmployee({
+        employee_code: empCode.trim(),
+        name: empName.trim(),
+        email: empEmail.trim(),
         pod_id: empPodId || null,
         standard_start_time: start,
         standard_end_time: end,
@@ -101,8 +121,34 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
       setEmpName('');
       setEmpEmail('');
       await loadWorkforceData();
+
+      // Show credentials distribution modal
+      const assignedPod = pods.find((p) => p.id === empPodId);
+      setCreatedCreds({
+        name: created.name || empName,
+        email: created.email || empEmail,
+        role: 'Employee',
+        temporaryPassword: created.temporary_password || 'EmployeePass123!',
+        podName: assignedPod?.name || 'Assigned Pod',
+        code: created.employee_code || empCode,
+      });
+      setShowCredsModal(true);
     } catch (err: any) {
-      setError(err.message || 'Failed to create employee');
+      if (err instanceof ApiError && err.validationErrors && err.validationErrors.length > 0) {
+        setValidationErrors(err.validationErrors);
+        setValidationFallbackMsg(err.message);
+        setShowValidationPopup(true);
+      } else if (err.validationErrors && err.validationErrors.length > 0) {
+        setValidationErrors(err.validationErrors);
+        setValidationFallbackMsg(err.message);
+        setShowValidationPopup(true);
+      } else {
+        const msg = err.message || 'Failed to create employee';
+        setError(msg);
+        setValidationErrors([{ field: 'employee_creation', fieldLabel: 'Employee Submission', reason: msg }]);
+        setValidationFallbackMsg(msg);
+        setShowValidationPopup(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -112,12 +158,23 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
     e.preventDefault();
     try {
       setLoading(true);
-      await api.createPod(newPodName);
+      setError(null);
+      await api.createPod(newPodName.trim());
       setShowAddPod(false);
       setNewPodName('');
       await loadWorkforceData();
     } catch (err: any) {
-      setError(err.message || 'Failed to create pod');
+      if (err.validationErrors && err.validationErrors.length > 0) {
+        setValidationErrors(err.validationErrors);
+        setValidationFallbackMsg(err.message);
+        setShowValidationPopup(true);
+      } else {
+        const msg = err.message || 'Failed to create pod';
+        setError(msg);
+        setValidationErrors([{ field: 'name', fieldLabel: 'Pod Name', reason: msg }]);
+        setValidationFallbackMsg(msg);
+        setShowValidationPopup(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -125,6 +182,7 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
 
   const handleOpenEmpDrawer = async (emp: Employee) => {
     setSelectedEmp(emp);
+    setDrawerPodTarget(emp.pod_id || '');
     setIsEmpDrawerOpen(true);
     try {
       const [uList, prefs] = await Promise.all([
@@ -135,6 +193,44 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
       if (prefs) setPrefDays(prefs.preferred_weekly_off_days);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleRelocateFromDrawer = async () => {
+    if (!selectedEmp || !drawerPodTarget || drawerPodTarget === selectedEmp.pod_id) return;
+    try {
+      setIsRelocating(true);
+      const updated = await api.relocateEmployee(selectedEmp.id, drawerPodTarget);
+      setSelectedEmp(updated);
+      await loadWorkforceData();
+      const targetPod = pods.find((p) => p.id === drawerPodTarget);
+      alert(`Successfully relocated ${selectedEmp.name} to ${targetPod?.name || 'new pod'}!`);
+    } catch (err: any) {
+      alert(err.message || 'Failed to relocate employee');
+    } finally {
+      setIsRelocating(false);
+    }
+  };
+
+  const handleOpenRelocateModal = (emp: Employee) => {
+    setRelocatingEmp(emp);
+    const otherPod = pods.find((p) => p.id !== emp.pod_id);
+    setTargetPodId(otherPod?.id || '');
+    setShowRelocateModal(true);
+  };
+
+  const handleConfirmRelocate = async () => {
+    if (!relocatingEmp || !targetPodId) return;
+    try {
+      setIsRelocating(true);
+      await api.relocateEmployee(relocatingEmp.id, targetPodId);
+      setShowRelocateModal(false);
+      setRelocatingEmp(null);
+      await loadWorkforceData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to relocate employee');
+    } finally {
+      setIsRelocating(false);
     }
   };
 
@@ -369,14 +465,25 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                     Pod Members
                   </span>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
                     {members.map((m) => (
                       <div
                         key={m.id}
-                        className="p-1.5 rounded-md bg-slate-50 text-slate-700 text-xs flex items-center justify-between"
+                        className="p-1.5 px-2 rounded-lg bg-slate-50 border border-slate-100 hover:border-slate-200 text-slate-700 text-xs flex items-center justify-between gap-1.5"
                       >
-                        <span className="font-medium truncate">{m.name}</span>
-                        <span className="font-mono text-[10px] text-slate-400">{m.employee_code}</span>
+                        <div className="min-w-0 pr-1">
+                          <span className="font-medium truncate block">{m.name}</span>
+                          <span className="font-mono text-[10px] text-slate-400">{m.employee_code}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenRelocateModal(m)}
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-white hover:bg-indigo-50 text-indigo-600 border border-slate-200 hover:border-indigo-300 text-[10px] font-semibold transition-colors cursor-pointer shrink-0"
+                          title="Relocate this employee to another pod"
+                        >
+                          <ArrowRightLeft className="w-3 h-3" />
+                          <span>Relocate</span>
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -535,6 +642,46 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
         width="lg"
       >
         <div className="space-y-6">
+          {/* Pod Membership & Relocation */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-3 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-900 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                <Network className="w-3.5 h-3.5 text-indigo-600" />
+                Pod Membership & Relocation
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                {pods.find((p) => p.id === selectedEmp?.pod_id)?.name || 'Unassigned Pod'}
+              </span>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <label className="block text-slate-600">Relocate to Another Pod:</label>
+              <div className="flex gap-2">
+                <select
+                  value={drawerPodTarget}
+                  onChange={(e) => setDrawerPodTarget(e.target.value)}
+                  className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+                >
+                  <option value="">-- Select Target Pod --</option>
+                  {pods.map((p) => (
+                    <option key={p.id} value={p.id} disabled={p.id === selectedEmp?.pod_id}>
+                      {p.name} {p.id === selectedEmp?.pod_id ? '(Current Pod)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!drawerPodTarget || drawerPodTarget === selectedEmp?.pod_id || isRelocating}
+                  onClick={handleRelocateFromDrawer}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span>{isRelocating ? 'Relocating...' : 'Relocate'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Shift & Capacity Details */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2 text-xs">
             <span className="font-bold text-slate-900 uppercase tracking-wider text-[10px]">
@@ -679,6 +826,83 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
           </div>
         </div>
       </DetailDrawer>
+
+      {/* Validation Error Popup Modal */}
+      <ValidationErrorPopupModal
+        isOpen={showValidationPopup}
+        onClose={() => setShowValidationPopup(false)}
+        title="Invalid Employee Input Data"
+        subtitle="The server rejected the employee creation request because one or more fields contain invalid data."
+        entityName="Employee"
+        errors={validationErrors}
+        fallbackMessage={validationFallbackMsg}
+      />
+
+      {/* Login Credentials Distribution Modal */}
+      <DistributeCredentialsModal
+        isOpen={showCredsModal}
+        onClose={() => setShowCredsModal(false)}
+        credentials={createdCreds}
+      />
+
+      {/* Relocate Employee Modal */}
+      <Modal
+        isOpen={showRelocateModal}
+        onClose={() => setShowRelocateModal(false)}
+        title="Relocate Employee to Pod"
+        subtitle={`Move ${relocatingEmp?.name || 'Employee'} to another operational pod`}
+        maxWidth="md"
+      >
+        <div className="space-y-4 p-1">
+          <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1.5 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Employee:</span>
+              <span className="font-bold text-slate-900">{relocatingEmp?.name} ({relocatingEmp?.employee_code})</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Current Pod:</span>
+              <span className="font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                {pods.find((p) => p.id === relocatingEmp?.pod_id)?.name || 'Unassigned'}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-slate-700">Target Operational Pod</label>
+            <select
+              value={targetPodId}
+              onChange={(e) => setTargetPodId(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-hidden focus:border-indigo-500"
+            >
+              <option value="">-- Choose destination pod --</option>
+              {pods.map((p) => (
+                <option key={p.id} value={p.id} disabled={p.id === relocatingEmp?.pod_id}>
+                  {p.name} {p.id === relocatingEmp?.pod_id ? '(Current Pod)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowRelocateModal(false)}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!targetPodId || targetPodId === relocatingEmp?.pod_id || isRelocating}
+              onClick={handleConfirmRelocate}
+              className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>{isRelocating ? 'Relocating...' : 'Confirm Relocation'}</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, ApiError } from '../services/api';
 import {
   Brand,
   ProcessItem,
@@ -7,8 +7,12 @@ import {
   PrimaryAssignment,
   Employee,
   BrandOperatingSchedule,
+  ValidationErrorDetail,
+  CreatedCredentials,
 } from '../services/types';
 import { Modal } from '../components/common/Modal';
+import { ValidationErrorPopupModal } from '../components/common/ValidationErrorPopupModal';
+import { DistributeCredentialsModal } from '../components/common/DistributeCredentialsModal';
 import {
   Briefcase,
   Layers,
@@ -71,6 +75,15 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
   const [brandSchedule, setBrandSchedule] = useState<BrandOperatingSchedule | null>(null);
   const [loadingSchedule, setLoadingSchedule] = useState(false);
 
+  // Validation Error Popup State
+  const [validationErrors, setValidationErrors] = useState<ValidationErrorDetail[]>([]);
+  const [showValidationPopup, setShowValidationPopup] = useState(false);
+  const [validationFallbackMsg, setValidationFallbackMsg] = useState('');
+
+  // Credentials Distribution State
+  const [createdCreds, setCreatedCreds] = useState<CreatedCredentials | null>(null);
+  const [showCredsModal, setShowCredsModal] = useState(false);
+
   const handleOpenBrandSchedule = async (brand: Brand) => {
     setSelectedBrandForModal(brand);
     setScheduleModalOpen(true);
@@ -120,13 +133,39 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
     e.preventDefault();
     try {
       setLoading(true);
-      await api.createBrand(brandCode, brandName);
+      setError(null);
+      const created = await api.createBrand(brandCode.trim(), brandName.trim());
       setShowAddBrand(false);
       setBrandCode('');
       setBrandName('');
       await loadOperationsData();
+
+      // Show login credentials distribution popup
+      const cleanCode = (created.code || brandCode).toLowerCase().replace(/_/g, '').replace(/-/g, '');
+      setCreatedCreds({
+        name: created.name || brandName,
+        email: created.login_email || `brand.${cleanCode}@example.com`,
+        role: 'Brand User',
+        temporaryPassword: created.temporary_password || 'BrandPass123!',
+        code: created.code || brandCode,
+      });
+      setShowCredsModal(true);
     } catch (err: any) {
-      setError(err.message || 'Failed to create brand');
+      if (err instanceof ApiError && err.validationErrors && err.validationErrors.length > 0) {
+        setValidationErrors(err.validationErrors);
+        setValidationFallbackMsg(err.message);
+        setShowValidationPopup(true);
+      } else if (err.validationErrors && err.validationErrors.length > 0) {
+        setValidationErrors(err.validationErrors);
+        setValidationFallbackMsg(err.message);
+        setShowValidationPopup(true);
+      } else {
+        const msg = err.message || 'Failed to create brand';
+        setError(msg);
+        setValidationErrors([{ field: 'code', fieldLabel: 'Brand Code / Name', reason: msg }]);
+        setValidationFallbackMsg(msg);
+        setShowValidationPopup(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -136,14 +175,25 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
     e.preventDefault();
     try {
       setLoading(true);
-      await api.createProcess(processCode, processName, processDesc);
+      setError(null);
+      await api.createProcess(processCode.trim(), processName.trim(), processDesc.trim());
       setShowAddProcess(false);
       setProcessCode('');
       setProcessName('');
       setProcessDesc('');
       await loadOperationsData();
     } catch (err: any) {
-      setError(err.message || 'Failed to create process');
+      if (err.validationErrors && err.validationErrors.length > 0) {
+        setValidationErrors(err.validationErrors);
+        setValidationFallbackMsg(err.message);
+        setShowValidationPopup(true);
+      } else {
+        const msg = err.message || 'Failed to create process';
+        setError(msg);
+        setValidationErrors([{ field: 'code', fieldLabel: 'Process Code / Name', reason: msg }]);
+        setValidationFallbackMsg(msg);
+        setShowValidationPopup(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -797,6 +847,24 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
           </div>
         ) : null}
       </Modal>
+
+      {/* Validation Error Popup Modal */}
+      <ValidationErrorPopupModal
+        isOpen={showValidationPopup}
+        onClose={() => setShowValidationPopup(false)}
+        title="Invalid Brand Input Data"
+        subtitle="The server rejected the brand creation request because one or more fields contain invalid data."
+        entityName="Brand"
+        errors={validationErrors}
+        fallbackMessage={validationFallbackMsg}
+      />
+
+      {/* Login Credentials Distribution Modal */}
+      <DistributeCredentialsModal
+        isOpen={showCredsModal}
+        onClose={() => setShowCredsModal(false)}
+        credentials={createdCreds}
+      />
     </div>
   );
 };

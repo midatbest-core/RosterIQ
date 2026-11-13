@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { User, DemoRole } from '../services/types';
+import { User, DemoRole, QuickLoginAccount } from '../services/types';
 import { RosterIQLogo } from '../components/brand/RosterIQLogo';
 import {
   Lock,
@@ -14,6 +14,9 @@ import {
   UserCheck,
   Sparkles,
   Loader2,
+  KeyRound,
+  Check,
+  Zap,
 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -64,6 +67,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [demoLoggingInRole, setDemoLoggingInRole] = useState<string | null>(null);
   const [demoDisabled, setDemoDisabled] = useState<boolean>(false);
 
+  // Live Database Accounts for 1-Click Dropdown Auto-Login (Employees & Brands)
+  const [quickAccounts, setQuickAccounts] = useState<{
+    employees: QuickLoginAccount[];
+    brands: QuickLoginAccount[];
+  }>({ employees: [], brands: [] });
+  const [selectedEmpId, setSelectedEmpId] = useState<string>('');
+  const [selectedBrandId, setSelectedBrandId] = useState<string>('');
+  const [isQuickLoggingIn, setIsQuickLoggingIn] = useState<boolean>(false);
+  const [directoryTab, setDirectoryTab] = useState<'employees' | 'brands'>('employees');
+
   useEffect(() => {
     let active = true;
     api.getDemoRoles()
@@ -80,10 +93,55 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         setDemoDisabled(true);
       });
 
+    // Fetch dynamic database accounts (including any newly created employees & brands)
+    api.getQuickLoginAccounts()
+      .then((data) => {
+        if (!active) return;
+        if (data && (data.employees?.length > 0 || data.brands?.length > 0)) {
+          setQuickAccounts(data);
+        }
+      })
+      .catch((err) => {
+        console.warn('Live directory accounts unavailable:', err);
+      });
+
     return () => {
       active = false;
     };
   }, []);
+
+  const handleSelectEmployee = (empId: string) => {
+    setSelectedEmpId(empId);
+    setSelectedBrandId('');
+    const emp = quickAccounts.employees.find((e) => e.id === empId);
+    if (emp) {
+      setEmail(emp.email);
+      setPassword(emp.password);
+    }
+  };
+
+  const handleSelectBrand = (brandId: string) => {
+    setSelectedBrandId(brandId);
+    setSelectedEmpId('');
+    const b = quickAccounts.brands.find((x) => x.id === brandId);
+    if (b) {
+      setEmail(b.email);
+      setPassword(b.password);
+    }
+  };
+
+  const handleAutoLoginDirect = async (userEmail: string, userPass: string) => {
+    try {
+      setIsQuickLoggingIn(true);
+      setError(null);
+      const user = await api.login(userEmail, userPass);
+      onLoginSuccess(user);
+    } catch (err: any) {
+      setError(err.message || 'Auto-login failed. Please check credentials.');
+    } finally {
+      setIsQuickLoggingIn(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,6 +270,196 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
               </div>
             </div>
           )}
+
+          {/* Live System Directory: Dropdown Auto-Login for All Employees (Even New Ones Created) */}
+          <div className="space-y-3 p-3.5 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200/80 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="p-1 rounded-md bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300">
+                  <UserCheck className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  Live Accounts Directory
+                </span>
+              </div>
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setDirectoryTab('employees')}
+                  className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                    directoryTab === 'employees'
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  Employees ({quickAccounts.employees.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDirectoryTab('brands')}
+                  className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                    directoryTab === 'brands'
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  Brands ({quickAccounts.brands.length})
+                </button>
+              </div>
+            </div>
+
+            {directoryTab === 'employees' ? (
+              <div className="space-y-2">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                  Select any employee to view credentials & auto-login:
+                </label>
+                <select
+                  value={selectedEmpId}
+                  onChange={(e) => handleSelectEmployee(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white font-medium focus:outline-hidden focus:border-indigo-500 cursor-pointer shadow-2xs"
+                >
+                  <option value="">
+                    -- Choose an Employee ({quickAccounts.employees.length} available) --
+                  </option>
+                  {quickAccounts.employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({emp.employee_code || 'EMP'}) · {emp.email} · [Pass: {emp.password}] · {emp.pod_name || ''}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Selected Employee Preview Card */}
+                {selectedEmpId && (
+                  (() => {
+                    const emp = quickAccounts.employees.find((e) => e.id === selectedEmpId);
+                    if (!emp) return null;
+                    return (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-indigo-200 dark:border-indigo-900/60 shadow-xs space-y-2.5 animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-bold text-slate-900 dark:text-white text-xs">
+                              {emp.name}
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-400 ml-1.5">
+                              ({emp.employee_code})
+                            </span>
+                          </div>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                            {emp.pod_name || 'Assigned Pod'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-50 dark:bg-slate-950/50 p-2 rounded-lg border border-slate-100 dark:border-slate-800 font-mono">
+                          <div>
+                            <span className="text-slate-400 block text-[9px] uppercase font-sans font-bold">Email</span>
+                            <span className="text-indigo-600 dark:text-indigo-400 truncate block">{emp.email}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[9px] uppercase font-sans font-bold">Password</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold block">{emp.password}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={isQuickLoggingIn || loading}
+                          onClick={() => handleAutoLoginDirect(emp.email, emp.password)}
+                          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {isQuickLoggingIn ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Signing In...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="w-3.5 h-3.5 text-amber-300" />
+                              <span>Auto-Login as {emp.name}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                  Select any brand user to view credentials & auto-login:
+                </label>
+                <select
+                  value={selectedBrandId}
+                  onChange={(e) => handleSelectBrand(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white font-medium focus:outline-hidden focus:border-indigo-500 cursor-pointer shadow-2xs"
+                >
+                  <option value="">
+                    -- Choose a Brand ({quickAccounts.brands.length} available) --
+                  </option>
+                  {quickAccounts.brands.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.code || 'BR'}) · {b.email} · [Pass: {b.password}]
+                    </option>
+                  ))}
+                </select>
+
+                {/* Selected Brand Preview Card */}
+                {selectedBrandId && (
+                  (() => {
+                    const b = quickAccounts.brands.find((x) => x.id === selectedBrandId);
+                    if (!b) return null;
+                    return (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-amber-200 dark:border-amber-900/60 shadow-xs space-y-2.5 animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-bold text-slate-900 dark:text-white text-xs">
+                              {b.name}
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-400 ml-1.5">
+                              ({b.code})
+                            </span>
+                          </div>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            Brand User
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-50 dark:bg-slate-950/50 p-2 rounded-lg border border-slate-100 dark:border-slate-800 font-mono">
+                          <div>
+                            <span className="text-slate-400 block text-[9px] uppercase font-sans font-bold">Email</span>
+                            <span className="text-amber-600 dark:text-amber-400 truncate block">{b.email}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[9px] uppercase font-sans font-bold">Password</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold block">{b.password}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={isQuickLoggingIn || loading}
+                          onClick={() => handleAutoLoginDirect(b.email, b.password)}
+                          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {isQuickLoggingIn ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Signing In...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="w-3.5 h-3.5 text-white" />
+                              <span>Auto-Login as {b.name}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Divider */}
           <div className="relative flex items-center justify-center">

@@ -48,6 +48,8 @@ class EmployeeRead(EmployeeBase):
 
     id: UUID
     status: EmployeeStatus
+    temporary_password: str | None = None
+    login_email: str | None = None
 
 
 class PodCreate(BaseModel):

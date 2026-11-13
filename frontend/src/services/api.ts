@@ -19,12 +19,70 @@ import {
   AppNotification,
   PresentationDemoAccount,
   DemoRole,
+  ValidationErrorDetail,
+  QuickLoginAccount,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const BASE_URL = `${API_BASE}/api/v1`;
 
 let inMemoryCsrfToken = '';
+
+const FIELD_LABELS: Record<string, string> = {
+  employee_code: 'Employee Code',
+  name: 'Full Name',
+  email: 'Email Address',
+  pod_id: 'Assigned Pod',
+  standard_start_time: 'Standard Start Time',
+  standard_end_time: 'Standard End Time',
+  daily_capacity_minutes: 'Daily Capacity (Minutes)',
+  code: 'Brand / Process Code',
+  brand_id: 'Brand',
+  process_id: 'Process',
+  password: 'Password',
+};
+
+function formatFieldReason(err: any): { reason: string; label: string; field: string; providedValue?: any } {
+  const locArr = Array.isArray(err.loc) ? err.loc : [];
+  const field = locArr.filter((x: any) => x !== 'body' && typeof x === 'string').join('.') || 'field';
+  const label = FIELD_LABELS[field] || field.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+  let reason = err.msg || 'Invalid value';
+
+  if (err.type === 'string_pattern_mismatch') {
+    reason = 'Must contain only letters, numbers, underscores (_), and hyphens (-). Spaces and special symbols are not allowed.';
+  } else if (err.type === 'value_error' || (typeof err.type === 'string' && err.type.startsWith('value_error'))) {
+    if (reason.toLowerCase().includes('later than standard_start_time')) {
+      reason = 'Standard end time must be later than standard start time.';
+    } else if (reason.toLowerCase().includes('daily_capacity_minutes')) {
+      reason = 'Total shift duration cannot exceed the daily capacity limit (default 9 hours).';
+    }
+  } else if (err.type === 'missing') {
+    reason = 'This field is required and cannot be left blank.';
+  } else if (err.type && typeof err.type === 'string' && err.type.includes('email')) {
+    reason = 'Must be a valid email address format (e.g. name@example.com).';
+  } else if (err.type && typeof err.type === 'string' && err.type.includes('time')) {
+    reason = 'Must be a valid time format (e.g. 09:00 or 18:00).';
+  }
+
+  reason = reason.replace(/^Value error,\s*/i, '');
+  return { reason, label, field, providedValue: err.input };
+}
+
+export class ApiError extends Error {
+  code: string;
+  status: number;
+  details?: any;
+  validationErrors: ValidationErrorDetail[];
+
+  constructor(message: string, code: string = 'ERROR', status: number = 400, details?: any, validationErrors: ValidationErrorDetail[] = []) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.status = status;
+    this.details = details;
+    this.validationErrors = validationErrors;
+  }
+}
 
 function getCsrfToken(): string {
   if (inMemoryCsrfToken) return inMemoryCsrfToken;
@@ -55,18 +113,66 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   if (!response.ok) {
     let errorDetail = 'An error occurred';
+    let errorCode = 'ERROR';
+    let rawDetails: any = null;
+    const validationErrors: ValidationErrorDetail[] = [];
+
     try {
       const errJson = await response.json();
+      errorCode = errJson.error?.code || (errJson.code ? String(errJson.code) : 'ERROR');
+      rawDetails = errJson.error?.details || errJson.details || null;
       errorDetail =
         errJson.error?.message ||
         (typeof errJson.detail === 'string' ? errJson.detail : null) ||
         errJson.message ||
-        errJson.error?.code ||
-        JSON.stringify(errJson);
+        errorCode;
+
+      // Parse array of Pydantic validation error objects
+      if (Array.isArray(rawDetails)) {
+        for (const item of rawDetails) {
+          if (item && typeof item === 'object') {
+            const formatted = formatFieldReason(item);
+            validationErrors.push({
+              field: formatted.field,
+              fieldLabel: formatted.label,
+              reason: formatted.reason,
+              providedValue: formatted.providedValue,
+            });
+          }
+        }
+      } else if (Array.isArray(errJson.detail)) {
+        for (const item of errJson.detail) {
+          if (item && typeof item === 'object') {
+            const formatted = formatFieldReason(item);
+            validationErrors.push({
+              field: formatted.field,
+              fieldLabel: formatted.label,
+              reason: formatted.reason,
+              providedValue: formatted.providedValue,
+            });
+          }
+        }
+      }
+
+      // Handle 409 Conflict constraints
+      if (response.status === 409 || errorCode === 'CONFLICT') {
+        validationErrors.push({
+          field: 'code',
+          fieldLabel: 'Unique Identifier / Code',
+          reason: 'A record with this code, email, or unique identifier already exists. Please use a unique value.',
+        });
+      }
+
+      // If we parsed validation errors, make the top-level message informative
+      if (validationErrors.length > 0) {
+        const errorSummary = validationErrors.map((v) => `${v.fieldLabel}: ${v.reason}`).join('; ');
+        errorDetail = `Invalid Input: ${errorSummary}`;
+      }
     } catch {
       errorDetail = await response.text();
     }
-    throw new Error(errorDetail);
+
+    throw new ApiError(errorDetail, errorCode, response.status, rawDetails, validationErrors);
   }
 
   if (response.status === 204) {
@@ -107,6 +213,13 @@ export const api = {
   },
   getPresentationDemoAccounts: () =>
     request<PresentationDemoAccount[]>('/auth/presentation-demo-accounts'),
+  getQuickLoginAccounts: async (): Promise<{ employees: QuickLoginAccount[]; brands: QuickLoginAccount[] }> => {
+    try {
+      return await request<{ employees: QuickLoginAccount[]; brands: QuickLoginAccount[] }>('/auth/quick-login-accounts');
+    } catch {
+      return { employees: [], brands: [] };
+    }
+  },
   getCurrentUser: () => request<User>('/auth/me'),
   logout: async () => {
     try {
@@ -137,6 +250,16 @@ export const api = {
     request<Employee>('/employees', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  updateEmployee: (id: string, data: Partial<Employee>) =>
+    request<Employee>(`/employees/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  relocateEmployee: (id: string, pod_id: string | null) =>
+    request<Employee>(`/employees/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ pod_id }),
     }),
 
   // Availability & Leaves
