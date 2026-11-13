@@ -1,0 +1,75 @@
+{
+  "scale_benchmarks": [
+    {
+      "dataset": "A_Current",
+      "num_employees": 36,
+      "num_brand_processes": 18,
+      "gen_duration_sec": 0.0289,
+      "val_duration_sec": 0.0041,
+      "total_duration_sec": 0.033,
+      "shifts_count": 470,
+      "allocations_count": 470,
+      "hard_conflicts": 0,
+      "soft_conflicts": 0,
+      "total_conflicts": 0,
+      "peak_mem_mb": 98.62,
+      "mem_delta_mb": 0.4
+    },
+    {
+      "dataset": "B_Medium",
+      "num_employees": 100,
+      "num_brand_processes": 48,
+      "gen_duration_sec": 1.0299,
+      "val_duration_sec": 0.008,
+      "total_duration_sec": 1.0379,
+      "shifts_count": 465,
+      "allocations_count": 465,
+      "hard_conflicts": 0,
+      "soft_conflicts": 0,
+      "total_conflicts": 775,
+      "peak_mem_mb": 102.21,
+      "mem_delta_mb": 3.45
+    },
+    {
+      "dataset": "C_Larger",
+      "num_employees": 300,
+      "num_brand_processes": 120,
+      "gen_duration_sec": 27.2753,
+      "val_duration_sec": 0.0409,
+      "total_duration_sec": 27.3163,
+      "shifts_count": 1853,
+      "allocations_count": 1853,
+      "hard_conflicts": 0,
+      "soft_conflicts": 0,
+      "total_conflicts": 1237,
+      "peak_mem_mb": 91.66,
+      "mem_delta_mb": -9.87
+    }
+  ],
+  "concurrent_benchmarks": [
+    {
+      "concurrency": 1,
+      "total_time_sec": 0.027,
+      "throughput_runs_per_sec": 37.04,
+      "avg_time_per_run_sec": 0.027
+    },
+    {
+      "concurrency": 2,
+      "total_time_sec": 0.0462,
+      "throughput_runs_per_sec": 43.25,
+      "avg_time_per_run_sec": 0.0231
+    },
+    {
+      "concurrency": 5,
+      "total_time_sec": 0.1143,
+      "throughput_runs_per_sec": 43.74,
+      "avg_time_per_run_sec": 0.0229
+    },
+    {
+      "concurrency": 10,
+      "total_time_sec": 0.2628,
+      "throughput_runs_per_sec": 38.05,
+      "avg_time_per_run_sec": 0.0263
+    }
+  ]
+}

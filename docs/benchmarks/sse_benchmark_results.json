@@ -1,0 +1,54 @@
+[
+  {
+    "concurrent_subscribers": 25,
+    "total_subscribe_time_ms": 0.1,
+    "avg_connect_latency_ms": 0.004,
+    "memory_before_mb": 39.11,
+    "memory_after_mb": 39.16,
+    "mem_overhead_kb_per_client": 1.92,
+    "delivery_avg_ms": 0.0059,
+    "delivery_p95_ms": 0.0167,
+    "delivery_max_ms": 0.0339,
+    "fanout_total_time_ms": 0.22,
+    "fanout_throughput_events_per_sec": 113688.0
+  },
+  {
+    "concurrent_subscribers": 50,
+    "total_subscribe_time_ms": 0.14,
+    "avg_connect_latency_ms": 0.0028,
+    "memory_before_mb": 39.26,
+    "memory_after_mb": 39.32,
+    "mem_overhead_kb_per_client": 1.36,
+    "delivery_avg_ms": 0.0043,
+    "delivery_p95_ms": 0.0077,
+    "delivery_max_ms": 0.0175,
+    "fanout_total_time_ms": 0.45,
+    "fanout_throughput_events_per_sec": 111582.2
+  },
+  {
+    "concurrent_subscribers": 100,
+    "total_subscribe_time_ms": 0.29,
+    "avg_connect_latency_ms": 0.0029,
+    "memory_before_mb": 39.37,
+    "memory_after_mb": 39.56,
+    "mem_overhead_kb_per_client": 1.92,
+    "delivery_avg_ms": 0.0037,
+    "delivery_p95_ms": 0.0048,
+    "delivery_max_ms": 0.0147,
+    "fanout_total_time_ms": 0.5,
+    "fanout_throughput_events_per_sec": 200521.4
+  },
+  {
+    "concurrent_subscribers": 200,
+    "total_subscribe_time_ms": 0.49,
+    "avg_connect_latency_ms": 0.0024,
+    "memory_before_mb": 39.66,
+    "memory_after_mb": 40.03,
+    "mem_overhead_kb_per_client": 1.86,
+    "delivery_avg_ms": 0.0036,
+    "delivery_p95_ms": 0.0046,
+    "delivery_max_ms": 0.0106,
+    "fanout_total_time_ms": 0.82,
+    "fanout_throughput_events_per_sec": 245098.0
+  }
+]

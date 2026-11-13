@@ -1,0 +1,57 @@
+{
+  "single_pk_lookup": {
+    "iterations": 500,
+    "avg_ms": 0.25,
+    "median_ms": 0.241,
+    "p95_ms": 0.283,
+    "p99_ms": 0.346
+  },
+  "complex_join_query": {
+    "iterations": 200,
+    "avg_ms": 1.685,
+    "median_ms": 1.658,
+    "p95_ms": 1.825,
+    "p99_ms": 2.678
+  },
+  "single_insert_commit": {
+    "iterations": 100,
+    "avg_ms": 4.082,
+    "median_ms": 3.563,
+    "p95_ms": 4.685,
+    "p99_ms": 50.909
+  },
+  "pool_concurrency_scaling": {
+    "10_threads": {
+      "total_queries": 100,
+      "total_time_s": 0.016,
+      "qps": 6298.3,
+      "avg_checkout_ms": 0.883,
+      "p95_checkout_ms": 3.979,
+      "p99_checkout_ms": 5.481
+    },
+    "25_threads": {
+      "total_queries": 250,
+      "total_time_s": 0.041,
+      "qps": 6124.1,
+      "avg_checkout_ms": 1.236,
+      "p95_checkout_ms": 4.633,
+      "p99_checkout_ms": 8.945
+    },
+    "50_threads": {
+      "total_queries": 500,
+      "total_time_s": 0.054,
+      "qps": 9220.0,
+      "avg_checkout_ms": 1.215,
+      "p95_checkout_ms": 3.453,
+      "p99_checkout_ms": 5.359
+    },
+    "100_threads": {
+      "total_queries": 1000,
+      "total_time_s": 0.109,
+      "qps": 9138.4,
+      "avg_checkout_ms": 1.861,
+      "p95_checkout_ms": 5.46,
+      "p99_checkout_ms": 8.651
+    }
+  }
+}
