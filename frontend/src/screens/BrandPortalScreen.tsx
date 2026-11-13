@@ -171,33 +171,18 @@ export const BrandPortalScreen: React.FC = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'PENDING':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-            <Clock className="w-3 h-3" /> Pending Review
-          </span>
-        );
       case 'UNDER_REVIEW':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
-            <Activity className="w-3 h-3" /> Under Review
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+            <Clock className="w-3 h-3" /> Under Review
           </span>
         );
       case 'APPROVED':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-            <CheckCircle2 className="w-3 h-3" /> Approved
-          </span>
-        );
       case 'ROSTER_PENDING':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300">
-            <RefreshCw className="w-3 h-3 animate-spin" /> Roster Re-sync Pending
-          </span>
-        );
       case 'IMPLEMENTED':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300">
-            <CheckCircle2 className="w-3 h-3" /> Published & Implemented
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+            <CheckCircle2 className="w-3 h-3" /> Accepted
           </span>
         );
       case 'REJECTED':

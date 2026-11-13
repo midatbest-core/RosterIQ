@@ -208,8 +208,8 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
     viewMode === 'pod' || viewMode === 'company' || viewMode === 'employee'
       ? 'Pod'
       : viewMode === 'brand'
-      ? 'Brand'
-      : 'Process';
+        ? 'Brand'
+        : 'Process';
 
   const allDates = gridData?.dates || [];
   const conflicts = gridData?.summary_conflicts || [];
@@ -259,11 +259,10 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
 
       {error && (
         <div
-          className={`p-3.5 text-xs rounded-xl flex items-center justify-between gap-3 ${
-            error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')
-              ? 'bg-amber-50 border border-amber-200 text-amber-900'
-              : 'bg-rose-50 border border-rose-200 text-rose-700'
-          }`}
+          className={`p-3.5 text-xs rounded-xl flex items-center justify-between gap-3 ${error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')
+            ? 'bg-amber-50 border border-amber-200 text-amber-900'
+            : 'bg-rose-50 border border-rose-200 text-rose-700'
+            }`}
         >
           <div className="flex items-center gap-2.5 flex-1">
             {error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS') ? (
@@ -323,11 +322,10 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
               <thead className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur-xs border-b border-slate-200 text-slate-600 font-semibold select-none">
                 <tr>
                   <th
-                    className={`sticky left-0 z-30 bg-slate-50/95 py-2.5 border-r border-slate-200 shadow-xs ${
-                      isMonthMode
-                        ? 'px-2.5 w-[150px] min-w-[150px] max-w-[150px]'
-                        : 'px-4 min-w-[220px] max-w-[260px]'
-                    }`}
+                    className={`sticky left-0 z-30 bg-slate-50/95 py-2.5 border-r border-slate-200 shadow-xs ${isMonthMode
+                      ? 'px-2.5 w-[150px] min-w-[150px] max-w-[150px]'
+                      : 'px-4 min-w-[220px] max-w-[260px]'
+                      }`}
                   >
                     <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                       {viewMode === 'brand' || viewMode === 'process' ? 'Process / Brand' : 'Employee / Pod'}
@@ -342,23 +340,20 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
                     return (
                       <th
                         key={dateStr}
-                        className={`py-2 text-center border-r border-slate-200/80 last:border-r-0 select-none ${
-                          isMonthMode
-                            ? 'px-0.5 w-[32px] min-w-[28px] max-w-[36px]'
-                            : 'px-2 min-w-[130px]'
-                        } ${isWeekend ? 'bg-slate-100/70 text-slate-900' : 'text-slate-700'}`}
+                        className={`py-2 text-center border-r border-slate-200/80 last:border-r-0 select-none ${isMonthMode
+                          ? 'px-0.5 w-[32px] min-w-[28px] max-w-[36px]'
+                          : 'px-2 min-w-[130px]'
+                          } ${isWeekend ? 'bg-slate-100/70 text-slate-900' : 'text-slate-700'}`}
                       >
                         <div
-                          className={`uppercase font-bold text-slate-400 ${
-                            isMonthMode ? 'text-[8px]' : 'text-[10px]'
-                          }`}
+                          className={`uppercase font-bold text-slate-400 ${isMonthMode ? 'text-[8px]' : 'text-[10px]'
+                            }`}
                         >
                           {dayName.slice(0, 2)}
                         </div>
                         <div
-                          className={`font-extrabold text-slate-900 ${
-                            isMonthMode ? 'text-[11px] mt-0' : 'text-xs mt-0.5'
-                          }`}
+                          className={`font-extrabold text-slate-900 ${isMonthMode ? 'text-[11px] mt-0' : 'text-xs mt-0.5'
+                            }`}
                         >
                           {dayNum}
                         </div>
@@ -374,11 +369,10 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
                   <tr key={row.row_id} className="hover:bg-slate-50/40 transition-colors">
                     {/* Sticky Row Title Cell */}
                     <td
-                      className={`sticky left-0 z-10 bg-white border-r border-slate-200/80 shadow-xs align-top ${
-                        isMonthMode
-                          ? 'px-2.5 py-2 w-[150px] min-w-[150px] max-w-[150px]'
-                          : 'px-4 py-3 min-w-[220px]'
-                      }`}
+                      className={`sticky left-0 z-10 bg-white border-r border-slate-200/80 shadow-xs align-top ${isMonthMode
+                        ? 'px-2.5 py-2 w-[150px] min-w-[150px] max-w-[150px]'
+                        : 'px-4 py-3 min-w-[220px]'
+                        }`}
                     >
                       <div className="space-y-0.5">
                         <span className="font-bold text-slate-900 block truncate text-xs" title={row.title}>
@@ -469,9 +463,8 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
                         return (
                           <td
                             key={dateStr}
-                            className={`p-0.5 border-r border-slate-200/60 last:border-r-0 align-middle text-center ${
-                              isWeekend ? 'bg-slate-50 text-slate-300' : 'text-slate-200'
-                            }`}
+                            className={`p-0.5 border-r border-slate-200/60 last:border-r-0 align-middle text-center ${isWeekend ? 'bg-slate-50 text-slate-300' : 'text-slate-200'
+                              }`}
                           >
                             <span className="text-[9px] font-mono select-none">·</span>
                           </td>
@@ -482,13 +475,12 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
                       return (
                         <td
                           key={dateStr}
-                          className={`p-1.5 border-r border-slate-200/60 last:border-r-0 align-top ${
-                            hasConflict
-                              ? 'bg-rose-50/70 border-rose-300 ring-1 ring-rose-400'
-                              : isWeekend
+                          className={`p-1.5 border-r border-slate-200/60 last:border-r-0 align-top ${hasConflict
+                            ? 'bg-rose-50/70 border-rose-300 ring-1 ring-rose-400'
+                            : isWeekend
                               ? 'bg-slate-50/40'
                               : ''
-                          }`}
+                            }`}
                         >
                           {hasConflict && (
                             <div className="mb-1.5 px-2 py-1 rounded bg-rose-100 border border-rose-300 text-rose-800 text-[10px] font-bold flex items-center justify-between shadow-2xs">

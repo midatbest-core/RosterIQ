@@ -135,16 +135,18 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
                           ) : item.request_status ? (
                             <span
                               className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
-                                item.request_status === 'APPROVED' || item.request_status === 'IMPLEMENTED'
+                                item.request_status === 'APPROVED' || item.request_status === 'IMPLEMENTED' || item.request_status === 'ROSTER_PENDING'
                                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : item.request_status === 'ROSTER_PENDING'
-                                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
                                   : item.request_status === 'REJECTED'
                                   ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                  : 'bg-slate-100 text-slate-600'
+                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
                               }`}
                             >
-                              {item.request_status.replace('_', ' ')}
+                              {item.request_status === 'APPROVED' || item.request_status === 'IMPLEMENTED' || item.request_status === 'ROSTER_PENDING'
+                                ? 'ACCEPTED'
+                                : item.request_status === 'REJECTED'
+                                ? 'REJECTED'
+                                : 'UNDER REVIEW'}
                             </span>
                           ) : null}
                         </div>

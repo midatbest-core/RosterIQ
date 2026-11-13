@@ -251,33 +251,18 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'PENDING':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-            <Clock className="w-3 h-3" /> Pending Review
-          </span>
-        );
       case 'UNDER_REVIEW':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
-            Under Review
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+            <Clock className="w-3 h-3" /> Under Review
           </span>
         );
       case 'APPROVED':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-            <CheckCircle2 className="w-3 h-3" /> Approved
-          </span>
-        );
       case 'ROSTER_PENDING':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300">
-            <RefreshCw className="w-3 h-3 animate-spin" /> Roster Re-sync Pending
-          </span>
-        );
       case 'IMPLEMENTED':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300">
-            <CheckCircle2 className="w-3 h-3" /> Implemented
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+            <CheckCircle2 className="w-3 h-3" /> Accepted
           </span>
         );
       case 'REJECTED':
@@ -563,24 +548,13 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
             ) : brandPreview ? (
               <div className="space-y-4 text-xs">
                 {/* Status Explanation Banner for Processed Requests */}
-                {selectedBrandReq.status === 'IMPLEMENTED' && (
-                  <div className="p-3.5 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-200 flex items-center gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-teal-400 shrink-0" />
+                {(selectedBrandReq.status === 'IMPLEMENTED' || selectedBrandReq.status === 'ROSTER_PENDING' || selectedBrandReq.status === 'APPROVED') && (
+                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <div>
-                      <p className="font-semibold text-xs">Request Implemented</p>
-                      <p className="text-[11px] text-teal-300/80">
-                        The operating plan change has been finalized and synchronized with the production calendar.
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {selectedBrandReq.status === 'ROSTER_PENDING' && (
-                  <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 flex items-center gap-2.5">
-                    <RefreshCw className="w-4 h-4 text-indigo-400 shrink-0 animate-spin" />
-                    <div>
-                      <p className="font-semibold text-xs">Approved — Roster Re-sync Pending</p>
-                      <p className="text-[11px] text-indigo-300/80">
-                        Plan change approved. Active draft roster updated and awaiting final resolution in Conflict Resolver.
+                      <p className="font-semibold text-xs">Request Accepted</p>
+                      <p className="text-[11px] text-emerald-300/80">
+                        Operating plan change request has been accepted and updated on the active schedule.
                       </p>
                     </div>
                   </div>
@@ -757,24 +731,13 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
             ) : empPreview ? (
               <div className="space-y-4 text-xs">
                 {/* Status Explanation Banner for Processed Requests */}
-                {selectedEmpReq.status === 'IMPLEMENTED' && (
-                  <div className="p-3.5 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-200 flex items-center gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-teal-400 shrink-0" />
+                {(selectedEmpReq.status === 'IMPLEMENTED' || selectedEmpReq.status === 'ROSTER_PENDING' || selectedEmpReq.status === 'APPROVED') && (
+                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <div>
-                      <p className="font-semibold text-xs">Leave Request Implemented</p>
-                      <p className="text-[11px] text-teal-300/80">
-                        Approved leave is active on the calendar and all shift conflicts have been resolved.
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {selectedEmpReq.status === 'ROSTER_PENDING' && (
-                  <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 flex items-center gap-2.5">
-                    <RefreshCw className="w-4 h-4 text-indigo-400 shrink-0 animate-spin" />
-                    <div>
-                      <p className="font-semibold text-xs">Approved — Roster Re-sync Pending</p>
-                      <p className="text-[11px] text-indigo-300/80">
-                        Leave approved and unavailability marked. Conflicting shifts identified and awaiting resolution in Conflict Resolver.
+                      <p className="font-semibold text-xs">Request Accepted</p>
+                      <p className="text-[11px] text-emerald-300/80">
+                        Leave request has been accepted and approved absence is reflected on the operational roster.
                       </p>
                     </div>
                   </div>
