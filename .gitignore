@@ -3,6 +3,10 @@
 *.env
 **/.env*
 *.env*
+*.local
+**/*.local
+*.credentials*
+.staging_test_credentials*
 .venv/
 __pycache__/
 *.py[cod]
