@@ -848,7 +848,7 @@ export const EmployeePortalScreen: React.FC = () => {
             /* Scheduled Working Shift Presentation: Supports multiple allocations per day */
             <div className="space-y-3">
               {getShiftsForDate(selectedDate).map((shift, idx) => (
-                <div key={shift.id || idx} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl bg-slate-950/80 border border-slate-800">
+                <div key={shift.allocation_id || idx} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl bg-slate-950/80 border border-slate-800">
                   <div className="space-y-1">
                     <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                       <Briefcase className="w-3.5 h-3.5 text-indigo-400" /> Company & Brand

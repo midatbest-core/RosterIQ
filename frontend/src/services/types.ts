@@ -430,6 +430,7 @@ export interface BrandProcessScheduleItem {
   process_id: string;
   process_name: string;
   process_code: string;
+  is_active?: boolean;
   pattern_label: string;
   operating_days: number[];
   start_time: string;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from collections import defaultdict
 import calendar
 import csv
 from datetime import date, datetime, time, timezone
@@ -430,16 +431,33 @@ def list_rosters(
         pod_emp_ids = set(db.scalars(select(Employee.id).where(Employee.pod_id == _user.pod_id)).all())
 
     rosters = db.scalars(query).all()
+    roster_ids = [r.id for r in rosters]
+    shifts_counts: dict[uuid.UUID, int] = {}
+    allocs_counts: dict[uuid.UUID, int] = {}
+    conflicts_by_roster: dict[uuid.UUID, list[RosterConflict]] = defaultdict(list)
+
+    if roster_ids:
+        shifts_q = select(EmployeeShift.roster_id, func.count(EmployeeShift.id)).where(EmployeeShift.roster_id.in_(roster_ids))
+        if _user.role == UserRole.POD_LEAD and pod_emp_ids:
+            shifts_q = shifts_q.where(EmployeeShift.employee_id.in_(pod_emp_ids))
+        shifts_counts = dict(db.execute(shifts_q.group_by(EmployeeShift.roster_id)).all())
+
+        allocs_q = select(RosterAllocation.roster_id, func.count(RosterAllocation.id)).where(RosterAllocation.roster_id.in_(roster_ids))
+        if _user.role == UserRole.POD_LEAD and pod_emp_ids:
+            allocs_q = allocs_q.where(RosterAllocation.employee_id.in_(pod_emp_ids))
+        allocs_counts = dict(db.execute(allocs_q.group_by(RosterAllocation.roster_id)).all())
+
+        conflicts_q = select(RosterConflict).where(RosterConflict.roster_id.in_(roster_ids))
+        if _user.role == UserRole.POD_LEAD and pod_emp_ids:
+            conflicts_q = conflicts_q.where(RosterConflict.employee_id.in_(pod_emp_ids))
+        for c in db.scalars(conflicts_q).all():
+            conflicts_by_roster[c.roster_id].append(c)
+
     results = []
     for r in rosters:
-        if _user.role == UserRole.POD_LEAD and pod_emp_ids:
-            shifts_count = db.scalar(select(func.count()).select_from(EmployeeShift).where(EmployeeShift.roster_id == r.id, EmployeeShift.employee_id.in_(pod_emp_ids))) or 0
-            allocs_count = db.scalar(select(func.count()).select_from(RosterAllocation).where(RosterAllocation.roster_id == r.id, RosterAllocation.employee_id.in_(pod_emp_ids))) or 0
-            conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == r.id, RosterConflict.employee_id.in_(pod_emp_ids))).all()
-        else:
-            shifts_count = db.scalar(select(func.count()).select_from(EmployeeShift).where(EmployeeShift.roster_id == r.id)) or 0
-            allocs_count = db.scalar(select(func.count()).select_from(RosterAllocation).where(RosterAllocation.roster_id == r.id)) or 0
-            conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == r.id)).all()
+        shifts_count = shifts_counts.get(r.id, 0)
+        allocs_count = allocs_counts.get(r.id, 0)
+        conflicts = conflicts_by_roster.get(r.id, [])
         results.append(
             RosterSummaryResponse(
                 id=r.id,
@@ -1916,7 +1934,14 @@ def _load_solver_inputs(roster: Roster, db: Session):
         for p in patterns
     }
 
-    overrides = db.scalars(select(OperatingOverride)).all()
+    m_start = date(roster.year, roster.month, 1)
+    m_end = date(roster.year, roster.month, num_days)
+
+    overrides = db.scalars(
+        select(OperatingOverride).where(
+            OperatingOverride.date >= m_start, OperatingOverride.date <= m_end
+        )
+    ).all()
     overrides_map = {
         (o.brand_process_id, o.date): OperatingOverrideSpec(
             brand_process_id=o.brand_process_id,
@@ -1929,7 +1954,12 @@ def _load_solver_inputs(roster: Roster, db: Session):
         for o in overrides
     }
 
-    holidays = {h.date for h in db.scalars(select(Holiday)).all()}
+    holidays = {
+        h.date
+        for h in db.scalars(
+            select(Holiday).where(Holiday.date >= m_start, Holiday.date <= m_end)
+        ).all()
+    }
 
     active_emps = db.scalars(select(Employee).where(Employee.status == EmployeeStatus.ACTIVE)).all()
     skills = db.scalars(select(EmployeeProcessSkill)).all()
@@ -1961,7 +1991,13 @@ def _load_solver_inputs(roster: Roster, db: Session):
         for pa in db.scalars(select(PrimaryAssignment).where(PrimaryAssignment.is_active == True)).all()
     ]
 
-    unavails = db.scalars(select(EmployeeUnavailability)).all()
+    unavails = db.scalars(
+        select(EmployeeUnavailability).where(
+            EmployeeUnavailability.date >= m_start,
+            EmployeeUnavailability.date <= m_end,
+            EmployeeUnavailability.is_approved == True,
+        )
+    ).all()
     unavails_map = {
         (u.employee_id, u.date): UnavailabilitySpec(
             employee_id=u.employee_id,

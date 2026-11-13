@@ -95,6 +95,42 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
     hard_conflicts: number;
   } | null>(null);
 
+  const [togglingBpId, setTogglingBpId] = useState<string | null>(null);
+
+  const handleToggleBrandProcess = async (brandProcessId: string, currentIsActive: boolean) => {
+    try {
+      setTogglingBpId(brandProcessId);
+      const newActive = !currentIsActive;
+      const res = await api.updateBrandProcess(brandProcessId, { is_active: newActive });
+
+      if (brandSchedule) {
+        setBrandSchedule({
+          ...brandSchedule,
+          processes: brandSchedule.processes.map((p) =>
+            p.brand_process_id === brandProcessId ? { ...p, is_active: newActive } : p
+          ),
+        });
+      }
+
+      setBrandProcesses((prev) =>
+        prev.map((bp) => (bp.id === brandProcessId ? { ...bp, is_active: newActive } : bp))
+      );
+
+      if (res.conflict_check) {
+        setConflictNotification({
+          title: `Service Status Updated (${newActive ? 'Enabled' : 'Disabled'})`,
+          message: res.conflict_check.message,
+          total_conflicts: res.conflict_check.total_conflicts,
+          hard_conflicts: res.conflict_check.hard_conflicts,
+        });
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to update service status');
+    } finally {
+      setTogglingBpId(null);
+    }
+  };
+
   const handleOpenBrandSchedule = async (brand: Brand) => {
     setSelectedBrandForModal(brand);
     setScheduleModalOpen(true);
@@ -731,8 +767,23 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
                           </div>
                         </div>
 
-                        {/* Operating Pattern Pill */}
-                        <div className="flex items-center gap-1.5">
+                        {/* Operating Pattern & Service Toggle */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={togglingBpId === proc.brand_process_id}
+                            onClick={() => handleToggleBrandProcess(proc.brand_process_id, proc.is_active !== false)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border shadow-2xs ${
+                              proc.is_active !== false
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                                : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'
+                            }`}
+                            title={proc.is_active !== false ? 'Click to disable service (excludes from roster generation)' : 'Click to enable service'}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${proc.is_active !== false ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                            <span>{togglingBpId === proc.brand_process_id ? 'Updating...' : proc.is_active !== false ? 'Active Service' : 'Disabled Service'}</span>
+                          </button>
+
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 shadow-2xs ${
                               is365

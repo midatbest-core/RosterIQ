@@ -152,6 +152,7 @@ def get_brand_operating_schedule(brand_id: UUID, db: Session = Depends(get_db)):
             "process_id": str(bp.process_id),
             "process_name": proc.name if proc else "Unknown Process",
             "process_code": proc.code if proc else "UNK",
+            "is_active": bool(bp.is_active),
             "pattern_label": pattern_label,
             "operating_days": [int(d.strip()) for d in pattern.operating_days.split(",") if d.strip()] if pattern else [0, 1, 2, 3, 4],
             "start_time": pattern.start_time.isoformat() if pattern else "09:00:00",
