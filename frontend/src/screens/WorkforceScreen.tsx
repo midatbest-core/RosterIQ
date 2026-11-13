@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 
 interface WorkforceScreenProps {
-  initialSubTab?: 'employees' | 'pods' | 'leaves';
+  initialSubTab?: 'employees' | 'pods';
   searchQuery?: string;
   currentUser?: User | null;
 }
@@ -32,7 +32,7 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   currentUser,
 }) => {
   const isPodLead = currentUser?.role === 'POD_LEAD';
-  const [subTab, setSubTab] = useState<'employees' | 'pods' | 'leaves'>(initialSubTab);
+  const [subTab, setSubTab] = useState<'employees' | 'pods'>(initialSubTab);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [pods, setPods] = useState<Pod[]>([]);
   const [loading, setLoading] = useState(false);
@@ -240,17 +240,6 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
                 <Network className="w-3.5 h-3.5" />
                 <span>Pods & Leads ({pods.length})</span>
               </button>
-              <button
-                onClick={() => setSubTab('leaves')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  subTab === 'leaves'
-                    ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <CalendarOff className="w-3.5 h-3.5" />
-                <span>Availability & Leave</span>
-              </button>
             </>
           )}
         </div>
@@ -395,25 +384,6 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Tab 3: Availability & Leave Overview */}
-      {subTab === 'leaves' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 p-6 shadow-2xs space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">Workforce Availability & Absences</h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Select an employee from the directory to review their approved leaves, medical off-days, and weekly-off preferences.
-            </p>
-          </div>
-
-          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/60 text-xs text-slate-700 space-y-2">
-            <span className="font-bold text-slate-900 block">Assessment Scenario 4.F Context:</span>
-            <p className="leading-relaxed">
-              Diya Patel is the sole Customer Support primary employee on <strong>Kavya Organics</strong>. When an approved medical leave is recorded for Nov 02–06, the scheduling engine flags an <code>UNCOVERED_SLOT</code> conflict. The Operations Manager can then discover ranked backup candidates and authorize cross-pod coverage with full audit tracking.
-            </p>
-          </div>
         </div>
       )}
 

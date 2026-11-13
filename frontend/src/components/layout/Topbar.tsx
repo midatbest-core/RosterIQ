@@ -77,14 +77,10 @@ export const Topbar: React.FC<TopbarProps> = ({
           : { section: 'Workforce', title: 'Employee Directory' };
       case 'pods':
         return { section: 'Workforce', title: 'Pods & Pod Leads' };
-      case 'leaves':
-        return { section: 'Workforce', title: 'Availability & Approved Leaves' };
       case 'brands':
         return { section: 'Operations', title: 'Brands & Processes' };
       case 'assignments':
         return { section: 'Operations', title: 'Primary Process Assignments' };
-      case 'rules':
-        return { section: 'Operations', title: 'Operating Patterns & Holiday Rules' };
       case 'history':
         return { section: 'Management', title: 'Roster Versioning & Audit History' };
       default:

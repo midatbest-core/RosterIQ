@@ -23,7 +23,6 @@ import {
   Sparkles,
   ArrowRightLeft,
   CheckCircle2,
-  CalendarOff,
   Clock,
   ChevronRight,
   TrendingUp,
@@ -245,7 +244,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           {/* Quick Actions Panel */}
           <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-2xs space-y-3">
             <h3 className="text-sm font-bold text-slate-900">Operational Quick Actions</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <button
                 onClick={onOpenGenerateModal}
                 className="p-3 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/40 text-left transition-all cursor-pointer group"
@@ -269,14 +268,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <Users className="w-4 h-4 text-blue-600 mb-2 group-hover:scale-110 transition-transform" />
                 <span className="block text-xs font-bold text-slate-900">Add Employee</span>
                 <span className="text-[11px] text-slate-500">Manage roster staff</span>
-              </button>
-              <button
-                onClick={() => onNavigate('leaves')}
-                className="p-3 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50/40 text-left transition-all cursor-pointer group"
-              >
-                <CalendarOff className="w-4 h-4 text-amber-600 mb-2 group-hover:scale-110 transition-transform" />
-                <span className="block text-xs font-bold text-slate-900">Manage Leave</span>
-                <span className="text-[11px] text-slate-500">Absence & preferences</span>
               </button>
             </div>
           </div>

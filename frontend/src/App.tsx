@@ -272,15 +272,9 @@ export const App: React.FC = () => {
         <WorkforceScreen initialSubTab="pods" searchQuery={searchQuery} currentUser={currentUser} />
       )}
 
-      {activeTab === 'leaves' && (
-        <WorkforceScreen initialSubTab="leaves" searchQuery={searchQuery} currentUser={currentUser} />
-      )}
-
       {activeTab === 'brands' && <OperationsScreen initialSubTab="brands" />}
 
       {activeTab === 'assignments' && <OperationsScreen initialSubTab="assignments" />}
-
-      {activeTab === 'rules' && <OperationsScreen initialSubTab="rules" />}
 
       {activeTab === 'history' && (
         <AuditHistoryScreen

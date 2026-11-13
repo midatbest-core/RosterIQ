@@ -3,10 +3,8 @@ import {
   LayoutDashboard,
   Users,
   Network,
-  CalendarOff,
   Briefcase,
   GitFork,
-  Sliders,
   Calendar,
   Sparkles,
   ShieldAlert,
@@ -31,10 +29,8 @@ export type NavTab =
   | 'allocation-log'
   | 'employees'
   | 'pods'
-  | 'leaves'
   | 'brands'
   | 'assignments'
-  | 'rules'
   | 'history';
 
 interface SidebarProps {
@@ -115,7 +111,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           items: [
             { id: 'employees' as NavTab, label: 'Employees', icon: Users },
             { id: 'pods' as NavTab, label: 'Pods Directory', icon: Network },
-            { id: 'leaves' as NavTab, label: 'Availability & Leave', icon: CalendarOff },
           ],
         },
         {
@@ -123,7 +118,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           items: [
             { id: 'brands' as NavTab, label: 'Brands & Processes', icon: Briefcase },
             { id: 'assignments' as NavTab, label: 'Primary Assignments', icon: GitFork },
-            { id: 'rules' as NavTab, label: 'Operating Rules', icon: Sliders },
           ],
         },
         {

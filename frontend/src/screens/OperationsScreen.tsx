@@ -13,13 +13,11 @@ import {
   Briefcase,
   Layers,
   GitFork,
-  Sliders,
   Plus,
   CheckCircle2,
   Calendar,
   Clock,
   Sparkles,
-  ShieldCheck,
   CalendarOff,
   Users,
   CalendarCheck,
@@ -30,13 +28,13 @@ import {
 } from 'lucide-react';
 
 interface OperationsScreenProps {
-  initialSubTab?: 'brands' | 'assignments' | 'rules';
+  initialSubTab?: 'brands' | 'assignments';
 }
 
 export const OperationsScreen: React.FC<OperationsScreenProps> = ({
   initialSubTab = 'brands',
 }) => {
-  const [subTab, setSubTab] = useState<'brands' | 'assignments' | 'rules'>(initialSubTab);
+  const [subTab, setSubTab] = useState<'brands' | 'assignments'>(initialSubTab);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [processes, setProcesses] = useState<ProcessItem[]>([]);
   const [brandProcesses, setBrandProcesses] = useState<BrandProcess[]>([]);
@@ -211,17 +209,6 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
             <GitFork className="w-3.5 h-3.5" />
             <span>Primary Assignments ({assignments.length})</span>
           </button>
-          <button
-            onClick={() => setSubTab('rules')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-              subTab === 'rules'
-                ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>Operating Rules & Holidays</span>
-          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -369,33 +356,6 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
                 })}
               </tbody>
             </table>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 3: Operating Rules & Holidays */}
-      {subTab === 'rules' && (
-        <div className="bg-white rounded-xl border border-slate-200/80 p-6 shadow-2xs space-y-5">
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold text-slate-900">
-              Holiday Precedence & Operating Pattern Engine
-            </h3>
-            <p className="text-xs text-slate-500">
-              Scheduling engine evaluates demand using strict canonical precedence rules.
-            </p>
-          </div>
-
-          <div className="p-4 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-2 text-xs text-indigo-950">
-            <span className="font-bold flex items-center gap-1.5 text-indigo-900">
-              <ShieldCheck className="w-4 h-4 text-indigo-600" />
-              Approved Evaluation Precedence
-            </span>
-            <div className="font-mono text-xs bg-white/80 p-3 rounded-lg border border-indigo-200 text-indigo-900 font-bold">
-              Date-Specific Override &rarr; Recurring Weekday Rule &rarr; Holiday Behaviour (CLOSED, NORMAL, REDUCED)
-            </div>
-            <p className="text-[11px] text-indigo-900/80 leading-relaxed pt-1">
-              Public holidays affect <strong>brand-process demand</strong>, not employee availability. An employee is not automatically made unavailable on public holidays unless recorded as approved personal leave.
-            </p>
           </div>
         </div>
       )}
