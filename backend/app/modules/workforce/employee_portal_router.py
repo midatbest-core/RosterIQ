@@ -22,6 +22,7 @@ from app.modules.auth.dependencies import (
 from app.modules.auth.models import User, UserRole
 from app.modules.auth.notifications import create_notification, notify_managers
 from app.modules.operations.models import Brand, BrandProcess, Process
+from app.modules.roster.engine.domain import ConflictType
 from app.modules.roster.models import (
     ConflictSeverity,
     EmployeeShift,
@@ -39,8 +40,10 @@ from app.modules.workforce.employee_portal_schemas import (
     EmployeeProfileRead,
     EmployeeReviewActionRequest,
     EmployeeTaskItem,
+    PodCapacityImpact,
+    StaffingShortageItem,
 )
-from app.modules.workforce.models import Employee, EmployeeProcessSkill, Pod, PodLead
+from app.modules.workforce.models import Employee, EmployeeProcessSkill, EmployeeStatus, Pod, PodLead
 from app.modules.workforce.request_models import EmployeeAvailabilityRequest, RequestStatus
 
 router = APIRouter(prefix="/employee-portal", tags=["Employee Portal"])
@@ -503,11 +506,155 @@ def preview_employee_request_impact(
             "process": proc_name,
         })
 
-    summary = (
-        f"Request coincides with {len(conflicts)} active shifts that require reassignment."
-        if conflicts
-        else "No scheduled shifts coincide with this request period."
-    )
+    # Pod Capacity Impact
+    pod_capacity = None
+    if emp.pod_id:
+        pod = db.get(Pod, emp.pod_id)
+        if pod:
+            pod_emps = db.scalars(
+                select(Employee).where(
+                    Employee.pod_id == emp.pod_id,
+                    Employee.status == EmployeeStatus.ACTIVE,
+                )
+            ).all()
+            pod_emp_ids = [e.id for e in pod_emps]
+            unavails = db.scalars(
+                select(EmployeeUnavailability).where(
+                    EmployeeUnavailability.employee_id.in_(pod_emp_ids),
+                    EmployeeUnavailability.date.in_(dates_list),
+                    EmployeeUnavailability.is_approved == True,
+                )
+            ).all()
+            on_leave_ids = {u.employee_id for u in unavails} | {emp.id}
+            on_leave_count = len(on_leave_ids)
+            total_members = len(pod_emps)
+            available_members = max(0, total_members - on_leave_count)
+
+            if available_members == 0:
+                impact_level = "CRITICAL"
+                summary_pod = f"Critical: All {total_members} members of {pod.name} unavailable on requested date(s)."
+            elif available_members <= max(1, total_members // 2):
+                impact_level = "ATTENTION"
+                summary_pod = f"High capacity impact: {pod.name} reduced to {available_members}/{total_members} available staff."
+            else:
+                impact_level = "NORMAL"
+                summary_pod = f"{pod.name} has {available_members}/{total_members} available staff during requested period."
+
+            pod_capacity = PodCapacityImpact(
+                pod_id=pod.id,
+                pod_name=pod.name,
+                total_members=total_members,
+                available_members=available_members,
+                on_leave_members=on_leave_count,
+                impact_level=impact_level,
+                summary=summary_pod,
+            )
+
+    # Staffing Shortages & Uncovered Slots Analysis
+    shortages: list[StaffingShortageItem] = []
+    seen_shortage_keys = set()
+
+    # A. Target roster unresolved conflicts (uncovered slots, insufficient staffing)
+    if target_roster:
+        rcs = db.scalars(
+            select(RosterConflict).where(
+                RosterConflict.roster_id == target_roster.id,
+                RosterConflict.date.in_(dates_list),
+                RosterConflict.is_resolved == False,
+            )
+        ).all()
+        for rc in rcs:
+            desc_lower = rc.description.lower()
+            is_shortage = (
+                rc.conflict_type in (ConflictType.UNCOVERED_SLOT, ConflictType.OVERLAPPING_SHIFT)
+                or "shortfall" in desc_lower
+                or "insufficient" in desc_lower
+                or "uncovered" in desc_lower
+                or "staffing" in desc_lower
+            )
+            if is_shortage:
+                b_name = "General Brand"
+                p_name = "General Process"
+                if rc.brand_process_id:
+                    if rc.brand_process_id not in bp_cache:
+                        bp_obj = db.get(BrandProcess, rc.brand_process_id)
+                        if bp_obj:
+                            bp_cache[rc.brand_process_id] = bp_obj
+                    bp = bp_cache.get(rc.brand_process_id)
+                    if bp:
+                        if bp.brand_id not in b_cache:
+                            b_obj = db.get(Brand, bp.brand_id)
+                            if b_obj:
+                                b_cache[bp.brand_id] = b_obj
+                        if bp.process_id not in p_cache:
+                            p_obj = db.get(Process, bp.process_id)
+                            if p_obj:
+                                p_cache[bp.process_id] = p_obj
+                        b_name = b_cache[bp.brand_id].name if bp.brand_id in b_cache else "Brand"
+                        p_name = p_cache[bp.process_id].name if bp.process_id in p_cache else "Process"
+
+                key = (rc.date.isoformat(), b_name, p_name, rc.description[:40])
+                if key not in seen_shortage_keys:
+                    seen_shortage_keys.add(key)
+                    shortages.append(
+                        StaffingShortageItem(
+                            date=rc.date.isoformat(),
+                            brand=b_name,
+                            process=p_name,
+                            description=rc.description,
+                        )
+                    )
+
+    # B. Conflicting shifts note: each active assigned shift will become unstaffed
+    for c in conflicts:
+        bp = bp_cache.get(c.brand_process_id)
+        b_name = b_cache[bp.brand_id].name if bp and bp.brand_id in b_cache else "Brand"
+        p_name = p_cache[bp.process_id].name if bp and bp.process_id in p_cache else "Process"
+        time_str = f"{c.start_time.strftime('%H:%M')} - {c.end_time.strftime('%H:%M')}"
+        desc = f"Direct shift on {c.date.isoformat()} ({time_str}) will be unstaffed upon leave approval."
+        key = (c.date.isoformat(), b_name, p_name, desc[:40])
+        if key not in seen_shortage_keys:
+            seen_shortage_keys.add(key)
+            shortages.append(
+                StaffingShortageItem(
+                    date=c.date.isoformat(),
+                    brand=b_name,
+                    process=p_name,
+                    description=desc,
+                )
+            )
+
+    # C. Pod capacity warning: if no explicit shortage conflict records yet,
+    # note pod capacity reduction so staffing impact is always explicit
+    if not shortages and pod_capacity:
+        for d in dates_list:
+            desc = f"Absence reduces {pod_capacity.pod_name} staffing capacity from {pod_capacity.total_members} to {pod_capacity.available_members} active staff."
+            shortages.append(
+                StaffingShortageItem(
+                    date=d.isoformat(),
+                    brand=pod_capacity.pod_name,
+                    process="Pod Staffing Capacity",
+                    description=desc,
+                )
+            )
+
+    # Synthesize comprehensive summary
+    if conflicts and shortages:
+        summary = (
+            f"Coincides with {len(conflicts)} scheduled shift(s) and raises "
+            f"{len(shortages)} staffing shortage/capacity deficit(s)."
+        )
+    elif conflicts:
+        summary = f"Request coincides with {len(conflicts)} active shift(s) that require reassignment."
+    elif shortages:
+        summary = (
+            f"No direct shifts scheduled for {emp.name}, but leave raises "
+            f"{len(shortages)} staffing shortage/capacity warning(s) on target dates."
+        )
+    else:
+        summary = "No scheduled shifts coincide with this request period."
+
+    requires_reassignment = len(conflicts) > 0 or len(shortages) > 0
 
     return EmployeeImpactPreview(
         request_id=req.id,
@@ -517,7 +664,10 @@ def preview_employee_request_impact(
         dates=[d.isoformat() for d in dates_list],
         conflicting_allocations_count=len(conflicts),
         conflicting_allocations=conflict_data,
-        requires_reassignment=len(conflicts) > 0,
+        staffing_shortages_count=len(shortages),
+        staffing_shortages=shortages,
+        pod_capacity_impact=pod_capacity,
+        requires_reassignment=requires_reassignment,
         summary=summary,
     )
 

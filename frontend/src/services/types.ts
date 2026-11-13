@@ -146,6 +146,25 @@ export interface EmployeeImpactPreview {
     brand: string;
     process: string;
   }>;
+  staffing_shortages_count?: number;
+  staffing_shortages?: Array<{
+    date: string;
+    brand: string;
+    process: string;
+    required?: number;
+    assigned?: number;
+    shortfall?: number;
+    description: string;
+  }>;
+  pod_capacity_impact?: {
+    pod_id?: string;
+    pod_name: string;
+    total_members: number;
+    available_members: number;
+    on_leave_members: number;
+    impact_level: string;
+    summary: string;
+  } | null;
   requires_reassignment: boolean;
   summary: string;
 }

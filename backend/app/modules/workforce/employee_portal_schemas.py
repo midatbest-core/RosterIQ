@@ -77,6 +77,26 @@ class EmployeeReviewActionRequest(BaseModel):
     manager_notes: str | None = Field(default=None, max_length=1000)
 
 
+class PodCapacityImpact(BaseModel):
+    pod_id: UUID | None = None
+    pod_name: str
+    total_members: int
+    available_members: int
+    on_leave_members: int
+    impact_level: str = "NORMAL"  # "NORMAL", "ATTENTION", "CRITICAL"
+    summary: str
+
+
+class StaffingShortageItem(BaseModel):
+    date: str
+    brand: str
+    process: str
+    required: int | None = None
+    assigned: int | None = None
+    shortfall: int | None = None
+    description: str
+
+
 class EmployeeImpactPreview(BaseModel):
     request_id: UUID
     employee_id: UUID
@@ -85,6 +105,9 @@ class EmployeeImpactPreview(BaseModel):
     dates: list[str]
     conflicting_allocations_count: int
     conflicting_allocations: list[dict]
+    staffing_shortages_count: int = 0
+    staffing_shortages: list[StaffingShortageItem] = Field(default_factory=list)
+    pod_capacity_impact: PodCapacityImpact | None = None
     requires_reassignment: bool
     summary: str
 

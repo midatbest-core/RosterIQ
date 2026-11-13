@@ -26,6 +26,8 @@ import {
   Calendar,
   Sparkles,
   UserPlus,
+  Users,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface RequestsCenterScreenProps {
@@ -789,27 +791,59 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                   </div>
                 )}
 
-                {/* Conflict Status */}
+                {/* Conflict & Staffing Shortage Status */}
                 <div
                   className={`p-3.5 rounded-xl border ${
                     empPreview.conflicting_allocations_count > 0
                       ? 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                      : (empPreview.staffing_shortages_count || 0) > 0
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
                       : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
                   }`}
                 >
-                  <p className="font-semibold text-sm mb-1">
-                    {empPreview.conflicting_allocations_count > 0
-                      ? `⚠️ ${empPreview.conflicting_allocations_count} Conflicting Shifts Detected`
-                      : '✓ No Shift Conflicts'}
+                  <p className="font-semibold text-sm mb-1 flex items-center gap-2">
+                    {empPreview.conflicting_allocations_count > 0 ? (
+                      <>⚠️ {empPreview.conflicting_allocations_count} Conflicting Shifts Detected</>
+                    ) : (empPreview.staffing_shortages_count || 0) > 0 ? (
+                      <>⚠️ Staffing Shortage Raised ({empPreview.staffing_shortages_count} Capacity Deficits)</>
+                    ) : (
+                      <>✓ No Shift Conflicts or Staffing Shortages</>
+                    )}
                   </p>
-                  <p className="text-slate-300">{empPreview.summary}</p>
+                  <p className="text-slate-300 text-xs leading-relaxed">{empPreview.summary}</p>
                 </div>
 
-                {/* Conflicting Shifts List */}
+                {/* Pod Capacity Impact */}
+                {empPreview.pod_capacity_impact && (
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <Users className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <div>
+                        <span className="font-semibold text-white">
+                          Pod Capacity: {empPreview.pod_capacity_impact.pod_name}
+                        </span>
+                        <p className="text-[11px] text-slate-400">{empPreview.pod_capacity_impact.summary}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
+                        {empPreview.pod_capacity_impact.available_members} Available
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-300">
+                        {empPreview.pod_capacity_impact.on_leave_members} On Leave
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Conflicting Shifts List (Directly Assigned) */}
                 {empPreview.conflicting_allocations.length > 0 && (
                   <div className="space-y-2">
-                    <h4 className="font-semibold text-white">Conflicting Shifts:</h4>
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    <h4 className="font-semibold text-white text-xs flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-rose-400" />
+                      Direct Scheduled Shifts to Reassign:
+                    </h4>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto">
                       {empPreview.conflicting_allocations.map((c) => (
                         <div
                           key={c.allocation_id}
@@ -823,6 +857,42 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                           </div>
                           <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                             Unavailability Conflict
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Staffing Shortages & Coverage Gaps List */}
+                {empPreview.staffing_shortages && empPreview.staffing_shortages.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-white text-xs flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-400" />
+                        Staffing Shortages & Capacity Shortfalls:
+                      </h4>
+                      <span className="text-[11px] text-amber-400 font-medium">
+                        {empPreview.staffing_shortages.length} shortage{empPreview.staffing_shortages.length > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                      {empPreview.staffing_shortages.map((s, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2.5 rounded-lg bg-amber-950/20 border border-amber-800/40 flex items-start justify-between gap-3 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <span className="font-semibold text-white">{s.date}</span>
+                            <p className="text-[11px] text-amber-200/90 font-medium mt-0.5">
+                              {s.brand} • {s.process}
+                            </p>
+                            <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                              {s.description}
+                            </p>
+                          </div>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                            Staffing Shortfall
                           </span>
                         </div>
                       ))}

@@ -296,3 +296,92 @@ def test_employee_portal_scoping_and_workflow(client: TestClient, db_session: Se
     impl_resp = client.post(f"/api/v1/employee-portal/requests/{req_id}/mark-implemented", headers=csrf_headers(client))
     assert impl_resp.status_code == 200
     assert impl_resp.json()["status"] == "IMPLEMENTED"
+
+
+def test_preview_impact_displays_staffing_shortage_when_no_direct_shifts(client, db_session):
+    """
+    Verifies that when an employee takes leave without direct shift allocations,
+    preview-impact still detects and surfaces pod capacity reduction and staffing shortages.
+    """
+    from app.modules.workforce.models import Pod, Employee, EmployeeStatus
+    from app.modules.auth.models import User, UserRole
+    from app.modules.workforce.request_models import EmployeeAvailabilityRequest
+    from app.core.security import hash_password
+
+    # Setup pod and employees
+    pod = Pod(name="Pod Alpha Shortage Test", is_active=True)
+    db_session.add(pod)
+    db_session.flush()
+
+    from datetime import time
+    emp1 = Employee(
+        name="Staff Member A",
+        employee_code=f"EMP-{uuid.uuid4().hex[:4].upper()}",
+        email=f"staff.a.{uuid.uuid4().hex[:6]}@rosteriq.io",
+        pod_id=pod.id,
+        daily_capacity_minutes=480,
+        standard_start_time=time(9, 0),
+        standard_end_time=time(18, 0),
+        status=EmployeeStatus.ACTIVE,
+    )
+    emp2 = Employee(
+        name="Staff Member B",
+        employee_code=f"EMP-{uuid.uuid4().hex[:4].upper()}",
+        email=f"staff.b.{uuid.uuid4().hex[:6]}@rosteriq.io",
+        pod_id=pod.id,
+        daily_capacity_minutes=480,
+        standard_start_time=time(9, 0),
+        standard_end_time=time(18, 0),
+        status=EmployeeStatus.ACTIVE,
+    )
+    db_session.add_all([emp1, emp2])
+    db_session.flush()
+
+    u1 = User(
+        email=emp1.email,
+        password_hash=hash_password("Pass1234!"),
+        role=UserRole.EMPLOYEE,
+        employee_id=emp1.id,
+        pod_id=pod.id,
+        is_active=True,
+    )
+    ops_user = User(
+        email=f"ops.mgr.{uuid.uuid4().hex[:6]}@rosteriq.io",
+        password_hash=hash_password("Pass1234!"),
+        role=UserRole.OPERATIONS_MANAGER,
+        is_active=True,
+    )
+    db_session.add_all([u1, ops_user])
+    db_session.commit()
+
+    # Leave request for emp1 on a future date with NO assigned shifts
+    leave_date = date(2026, 12, 10)
+    req = EmployeeAvailabilityRequest(
+        employee_id=emp1.id,
+        requested_by_user_id=u1.id,
+        request_type="LEAVE",
+        reason_type="PLANNED_LEAVE",
+        start_date=leave_date,
+        end_date=leave_date,
+        notes="Vacation day",
+        status="PENDING",
+    )
+    db_session.add(req)
+    db_session.commit()
+
+    # Login as Operations Manager
+    client.post("/api/v1/auth/login", json={"email": ops_user.email, "password": "Pass1234!"})
+
+    resp = client.post(f"/api/v1/employee-portal/requests/{req.id}/preview-impact", headers=csrf_headers(client))
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["conflicting_allocations_count"] == 0
+    assert data["requires_reassignment"] is True
+    assert data["staffing_shortages_count"] >= 1
+    assert data["pod_capacity_impact"] is not None
+    assert data["pod_capacity_impact"]["pod_name"] == pod.name
+    assert data["pod_capacity_impact"]["total_members"] == 2
+    assert data["pod_capacity_impact"]["available_members"] == 1
+    assert "staffing shortage" in data["summary"].lower() or "capacity" in data["summary"].lower()
+
