@@ -27,43 +27,52 @@ const BASE_URL = `${API_BASE}/api/v1`;
 
 let inMemoryCsrfToken = '';
 
+export function getSessionToken(): string {
+  try {
+    return sessionStorage.getItem('rosteriq_session_token') || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setSessionToken(token: string): void {
+  try {
+    if (token) {
+      sessionStorage.setItem('rosteriq_session_token', token);
+    } else {
+      sessionStorage.removeItem('rosteriq_session_token');
+    }
+  } catch {}
+}
+
 function getCsrfToken(): string {
-  // 1. Check document.cookie first if accessible (always matches what browser sends for same-origin)
-  try {
-    if (typeof document !== 'undefined') {
-      const match = document.cookie.match(new RegExp('(^| )csrf_token=([^;]+)'));
-      if (match && match[2]) {
-        const val = decodeURIComponent(match[2]);
-        inMemoryCsrfToken = val;
-        return val;
-      }
-    }
-  } catch {}
-
-  // 2. Check localStorage (shared across tabs on the same origin)
-  try {
-    const storedLocal = localStorage.getItem('rosteriq_csrf_token');
-    if (storedLocal) {
-      inMemoryCsrfToken = storedLocal;
-      return storedLocal;
-    }
-  } catch {}
-
-  // 3. Check sessionStorage (tab-scoped)
   try {
     const storedSession = sessionStorage.getItem('rosteriq_csrf_token');
-    if (storedSession) {
-      inMemoryCsrfToken = storedSession;
-      return storedSession;
+    if (storedSession) return storedSession;
+  } catch {}
+  return inMemoryCsrfToken || '';
+}
+
+function setCsrfToken(csrf: string): void {
+  inMemoryCsrfToken = csrf;
+  try {
+    if (csrf) {
+      sessionStorage.setItem('rosteriq_csrf_token', csrf);
+    } else {
+      sessionStorage.removeItem('rosteriq_csrf_token');
     }
   } catch {}
-
-  return inMemoryCsrfToken || '';
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
   headers.set('Content-Type', 'application/json');
+
+  // Tab-specific Bearer token: guarantees each browser tab acts as an independent session
+  const token = getSessionToken();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
 
   const csrf = getCsrfToken();
   if (csrf) {
@@ -100,49 +109,41 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  // Session Token accessors for tab-isolated authentication
+  getSessionToken,
+  setSessionToken,
+
   // Auth
   login: async (email: string, password: string): Promise<User> => {
-    const res = await request<{ user: User; csrf_token: string } | User>('/auth/login', {
+    const res = await request<{ user: User; csrf_token: string; access_token?: string } | User>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-    if (typeof res === 'object' && res !== null && 'csrf_token' in res && (res as any).csrf_token) {
-      inMemoryCsrfToken = (res as any).csrf_token;
-      try {
-        sessionStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
-        localStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
-      } catch {}
+    if (typeof res === 'object' && res !== null) {
+      if ('access_token' in res && (res as any).access_token) {
+        setSessionToken((res as any).access_token);
+      }
+      if ('csrf_token' in res && (res as any).csrf_token) {
+        setCsrfToken((res as any).csrf_token);
+      }
     }
-    const user = (res as any).user ? (res as any).user : (res as User);
-    try {
-      localStorage.setItem(
-        'rosteriq_auth_event',
-        JSON.stringify({ type: 'login', role: user.role, email: user.email, ts: Date.now() })
-      );
-    } catch {}
-    return user;
+    return (res as any).user ? (res as any).user : (res as User);
   },
   getDemoRoles: () => request<DemoRole[]>('/auth/demo-roles'),
   demoLogin: async (role: string): Promise<User> => {
-    const res = await request<{ user: User; csrf_token: string } | User>('/auth/demo-login', {
+    const res = await request<{ user: User; csrf_token: string; access_token?: string } | User>('/auth/demo-login', {
       method: 'POST',
       body: JSON.stringify({ role }),
     });
-    if (typeof res === 'object' && res !== null && 'csrf_token' in res && (res as any).csrf_token) {
-      inMemoryCsrfToken = (res as any).csrf_token;
-      try {
-        sessionStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
-        localStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
-      } catch {}
+    if (typeof res === 'object' && res !== null) {
+      if ('access_token' in res && (res as any).access_token) {
+        setSessionToken((res as any).access_token);
+      }
+      if ('csrf_token' in res && (res as any).csrf_token) {
+        setCsrfToken((res as any).csrf_token);
+      }
     }
-    const user = (res as any).user ? (res as any).user : (res as User);
-    try {
-      localStorage.setItem(
-        'rosteriq_auth_event',
-        JSON.stringify({ type: 'login', role: user.role, email: user.email, ts: Date.now() })
-      );
-    } catch {}
-    return user;
+    return (res as any).user ? (res as any).user : (res as User);
   },
   getPresentationDemoAccounts: () =>
     request<PresentationDemoAccount[]>('/auth/presentation-demo-accounts'),
@@ -155,24 +156,25 @@ export const api = {
       return { employees: [], brands: [] };
     }
   },
-  getCurrentUser: () => request<User>('/auth/me'),
+  getCurrentUser: async (): Promise<User | null> => {
+    // If this tab does not have an active session token, it is unauthenticated.
+    // Do not fall back to shared ambient cookies from other tabs.
+    const token = getSessionToken();
+    if (!token) {
+      return null;
+    }
+    return request<User>('/auth/me');
+  },
   logout: async () => {
     try {
       await request<{ message: string }>('/auth/logout', { method: 'POST' });
     } catch (err) {
-      // If server logout fails (e.g. CSRF token mismatch from another tab, 403, 401, or network drop),
-      // do not throw — proceed with complete client-side session cleanup so the user is never trapped.
+      // If server logout fails (e.g. network drop or already expired),
+      // proceed with tab-isolated session cleanup so the tab is always cleanly logged out.
       console.warn('Server logout returned error; completing local session termination:', err);
     } finally {
-      inMemoryCsrfToken = '';
-      try {
-        sessionStorage.removeItem('rosteriq_csrf_token');
-        localStorage.removeItem('rosteriq_csrf_token');
-        localStorage.setItem(
-          'rosteriq_auth_event',
-          JSON.stringify({ type: 'logout', ts: Date.now() })
-        );
-      } catch {}
+      setCsrfToken('');
+      setSessionToken('');
     }
   },
   getNotifications: () => request<AppNotification[]>('/auth/notifications'),

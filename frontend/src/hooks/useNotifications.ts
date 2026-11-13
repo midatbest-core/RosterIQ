@@ -112,9 +112,11 @@ export function useNotifications(currentUser: User | null) {
         eventSourceRef.current = null;
       }
 
-      // Native EventSource carries session cookies ({ withCredentials: true } ensures cross-origin cookies work if direct API URL is set)
+      // Native EventSource: attach tab-isolated session token if available
+      const token = api.getSessionToken();
       const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
-      const es = new EventSource(`${apiBase}/api/v1/auth/notifications/stream`, { withCredentials: true });
+      const sseUrl = `${apiBase}/api/v1/auth/notifications/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+      const es = new EventSource(sseUrl, { withCredentials: true });
       eventSourceRef.current = es;
 
       es.addEventListener('connected', () => {

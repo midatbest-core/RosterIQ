@@ -15,7 +15,20 @@ from app.modules.auth.models import User, UserRole
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    token = request.cookies.get("access_token")
+    # 1. Bearer token in Authorization header (enables independent sessions per tab)
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+
+    # 2. Query param (for EventSource SSE streams where custom headers cannot be set)
+    if not token:
+        token = request.query_params.get("token")
+
+    # 3. Fall back to cookie (for backward compatibility with standard cookie clients)
+    if not token:
+        token = request.cookies.get("access_token")
+
     if not token:
         raise AppError("NOT_AUTHENTICATED", "Authentication is required.", 401)
     payload = decode_access_token(token)
@@ -46,6 +59,11 @@ def require_roles(*roles: UserRole) -> Callable[..., User]:
 
 
 def verify_csrf(request: Request) -> None:
+    # Requests authenticated via explicit Authorization header are immune to CSRF
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return
+
     cookie_token = request.cookies.get("csrf_token")
     header_token = request.headers.get("X-CSRF-Token")
     if not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
@@ -53,12 +71,18 @@ def verify_csrf(request: Request) -> None:
 
 
 def verify_csrf_for_logout(request: Request) -> None:
+    # Requests authenticated via explicit Authorization header are immune to CSRF
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return
+
     cookie_token = request.cookies.get("csrf_token")
     header_token = request.headers.get("X-CSRF-Token")
     if not header_token and not cookie_token:
         raise AppError("CSRF_VALIDATION_FAILED", "A valid CSRF token is required.", 403)
     if not header_token:
         raise AppError("CSRF_VALIDATION_FAILED", "A valid CSRF token is required.", 403)
+
 
 
 

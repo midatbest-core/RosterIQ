@@ -59,7 +59,11 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
         max_age=settings.access_token_minutes * 60,
         path="/",
     )
-    return LoginResponse(user=UserRead.model_validate(user), csrf_token=csrf_token)
+    return LoginResponse(
+        user=UserRead.model_validate(user),
+        csrf_token=csrf_token,
+        access_token=access_token,
+    )
 
 
 @router.post("/logout", status_code=204, dependencies=[Depends(verify_csrf_for_logout)])
@@ -601,7 +605,11 @@ def demo_login(
         max_age=settings.access_token_minutes * 60,
         path="/",
     )
-    return LoginResponse(user=UserRead.model_validate(user), csrf_token=csrf_token)
+    return LoginResponse(
+        user=UserRead.model_validate(user),
+        csrf_token=csrf_token,
+        access_token=access_token,
+    )
 
 
 

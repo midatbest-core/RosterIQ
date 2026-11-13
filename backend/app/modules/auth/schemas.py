@@ -29,6 +29,7 @@ class UserRead(BaseModel):
 class LoginResponse(BaseModel):
     user: UserRead
     csrf_token: str
+    access_token: str | None = None
 
 
 class DemoLoginRequest(BaseModel):
