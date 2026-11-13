@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,7 +21,31 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = Field(default=60, ge=5, le=1440)
     cookie_secure: bool = False
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] | str = ["http://localhost:5173"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: object) -> list[str]:
+        if isinstance(v, str):
+            v = v.strip()
+            if (v.startswith("[") and v.endswith("]")) or (v.startswith("{") and v.endswith("}")):
+                try:
+                    parsed = json.loads(v)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if item]
+                except Exception:
+                    # Also handle single-quoted array notation like ['https://domain.com']
+                    if v.startswith("[") and v.endswith("]"):
+                        inner = v[1:-1]
+                        return [
+                            item.strip().strip("'\"")
+                            for item in inner.split(",")
+                            if item.strip().strip("'\"")
+                        ]
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if item]
+        return ["http://localhost:5173"]
 
     # SMTP Email Configuration
     smtp_enabled: bool = False

@@ -13,7 +13,9 @@ def test_initial_migration_upgrades_and_downgrades(tmp_path: Path, monkeypatch) 
     monkeypatch.setenv("ROSTERIQ_DATABASE_URL", database_url)
     get_settings.cache_clear()
 
-    config = Config("alembic.ini")
+    alembic_ini_path = Path(__file__).resolve().parents[1] / "alembic.ini"
+    config = Config(str(alembic_ini_path))
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
     command.upgrade(config, "head")
 
     engine = create_engine(database_url)
