@@ -7,6 +7,7 @@ import {
   PrimaryAssignment,
   Employee,
   BrandOperatingSchedule,
+  BrandProcessScheduleItem,
 } from '../services/types';
 import { Modal } from '../components/common/Modal';
 import {
@@ -26,6 +27,7 @@ import {
   Sun,
   AlertTriangle,
   Trash2,
+  Power,
 } from 'lucide-react';
 
 interface OperationsScreenProps {
@@ -50,6 +52,11 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
   const [brandToDelete, setBrandToDelete] = useState<Brand | null>(null);
   const [isDeletingBrand, setIsDeletingBrand] = useState(false);
   const [showReoptimizeNotice, setShowReoptimizeNotice] = useState(false);
+
+  // Brand Service State (Disable / Delete)
+  const [serviceToDelete, setServiceToDelete] = useState<BrandProcessScheduleItem | null>(null);
+  const [isDeletingService, setIsDeletingService] = useState(false);
+  const [isTogglingService, setIsTogglingService] = useState<string | null>(null);
 
   // Add Brand Form
   const [showAddBrand, setShowAddBrand] = useState(false);
@@ -200,13 +207,55 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
       setIsDeletingBrand(true);
       const res = await api.deleteBrand(brandToDelete.id);
       setBrandToDelete(null);
+      if (selectedBrandForModal?.id === brandToDelete.id) {
+        setScheduleModalOpen(false);
+        setSelectedBrandForModal(null);
+      }
       await loadOperationsData();
       setShowReoptimizeNotice(true);
-      alert(res.message || 'Brand and its processes deleted successfully.');
+      alert(res.message || 'Brand and its processes deleted successfully. Changes effective next month.');
     } catch (err: any) {
       alert(err.message || 'Failed to delete brand');
     } finally {
       setIsDeletingBrand(false);
+    }
+  };
+
+  const handleToggleService = async (proc: BrandProcessScheduleItem) => {
+    try {
+      setIsTogglingService(proc.brand_process_id);
+      const newStatus = proc.is_active === false ? true : false;
+      await api.toggleBrandService(proc.brand_process_id, newStatus);
+      if (selectedBrandForModal) {
+        const data = await api.getBrandOperatingSchedule(selectedBrandForModal.id);
+        setBrandSchedule(data);
+      }
+      await loadOperationsData();
+      setShowReoptimizeNotice(true);
+    } catch (err: any) {
+      alert(err.message || 'Failed to toggle service status');
+    } finally {
+      setIsTogglingService(null);
+    }
+  };
+
+  const handleConfirmDeleteService = async () => {
+    if (!serviceToDelete) return;
+    try {
+      setIsDeletingService(true);
+      const res = await api.deleteBrandService(serviceToDelete.brand_process_id);
+      setServiceToDelete(null);
+      if (selectedBrandForModal) {
+        const data = await api.getBrandOperatingSchedule(selectedBrandForModal.id);
+        setBrandSchedule(data);
+      }
+      await loadOperationsData();
+      setShowReoptimizeNotice(true);
+      alert(res.message || 'Service deleted from brand. Changes effective from next month.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete service');
+    } finally {
+      setIsDeletingService(false);
     }
   };
 
@@ -686,6 +735,17 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
                   Showing operational calendars for <strong>{brandSchedule.processes.length}</strong> process(es) associated with {brandSchedule.brand_name}.
                 </span>
               </div>
+              {selectedBrandForModal && (
+                <button
+                  type="button"
+                  onClick={() => setBrandToDelete(selectedBrandForModal)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                  title="Delete Brand"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Delete Brand</span>
+                </button>
+              )}
             </div>
 
             {brandSchedule.processes.length === 0 ? (
@@ -703,24 +763,39 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
                   return (
                     <div
                       key={proc.brand_process_id}
-                      className="p-4 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-3.5"
+                      className={`p-4 rounded-xl border transition-all ${
+                        proc.is_active === false
+                          ? 'border-slate-200 bg-slate-50/60 opacity-80'
+                          : 'border-slate-200 bg-white shadow-2xs'
+                      } space-y-3.5`}
                     >
                       {/* Process Header & Operating Pattern Badge */}
                       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
                         <div className="flex items-center gap-2">
-                          <span className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">
+                          <span className={`w-7 h-7 rounded-lg font-bold flex items-center justify-center text-xs ${
+                            proc.is_active === false
+                              ? 'bg-slate-200 text-slate-600'
+                              : 'bg-indigo-100 text-indigo-700'
+                          }`}>
                             {proc.process_code}
                           </span>
                           <div>
-                            <h4 className="text-sm font-bold text-slate-900">{proc.process_name}</h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold text-slate-900">{proc.process_name}</h4>
+                              {proc.is_active === false && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-600 border border-slate-300">
+                                  DISABLED
+                                </span>
+                              )}
+                            </div>
                             <span className="text-[10px] text-slate-400 font-mono">
                               ID: {proc.brand_process_id.slice(0, 8)}...
                             </span>
                           </div>
                         </div>
 
-                        {/* Operating Pattern Pill */}
-                        <div className="flex items-center gap-1.5">
+                        {/* Operating Pattern Pill & Controls */}
+                        <div className="flex items-center gap-2">
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 shadow-2xs ${
                               is365
@@ -735,6 +810,32 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
                             <CalendarCheck className="w-3.5 h-3.5" />
                             {proc.pattern_label}
                           </span>
+
+                          {/* Disable / Enable Brand's Service Option */}
+                          <button
+                            type="button"
+                            disabled={isTogglingService === proc.brand_process_id}
+                            onClick={() => handleToggleService(proc)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                              proc.is_active !== false
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'
+                            }`}
+                            title={proc.is_active !== false ? 'Click to disable service for this brand' : 'Click to enable service for this brand'}
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                            <span>{proc.is_active !== false ? 'Service Active' : 'Service Disabled'}</span>
+                          </button>
+
+                          {/* Delete Service Button */}
+                          <button
+                            type="button"
+                            onClick={() => setServiceToDelete(proc)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-colors cursor-pointer"
+                            title="Delete Service"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
 
@@ -871,37 +972,148 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
         <Modal
           isOpen={!!brandToDelete}
           onClose={() => setBrandToDelete(null)}
-          title="Delete Brand & Processes"
-          subtitle={`Permanently remove ${brandToDelete.name}`}
-          maxWidth="md"
+          title="Delete Brand & Associated Services"
+          subtitle={`Target Brand: ${brandToDelete.name}`}
+          maxWidth="lg"
         >
           <div className="space-y-4 p-1">
-            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2 text-xs text-rose-950">
-              <div className="flex items-center gap-2 font-bold text-rose-900">
-                <AlertTriangle className="w-4 h-4 text-rose-600" />
-                <span>Confirm Brand Deletion</span>
+            {/* Mandatory Red Warning */}
+            <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-xl space-y-2 text-rose-950">
+              <div className="flex items-center gap-2 font-black text-rose-800 text-sm tracking-wide">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                <span>WARNING: DELETING THIS BRAND MAY CAUSE SCHEDULING CONFLICTS</span>
               </div>
-              <p className="text-[11px] leading-relaxed text-rose-800">
-                Deleting brand <strong>{brandToDelete.name} ({brandToDelete.code})</strong> will permanently delete this brand and all of its associated processes, operating schedules, and primary assignments. This action cannot be undone.
+              <p className="text-xs leading-relaxed text-rose-900 font-medium">
+                Deleting this brand may affect its services, employee assignments, primary allocations and upcoming roster coverage.
+              </p>
+              <p className="text-xs font-black text-rose-950 tracking-wide bg-rose-100/80 p-2 rounded-lg border border-rose-300">
+                Effective roster changes will be applied from the next month.
               </p>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            {/* Impact Summary Details */}
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-2 text-xs">
+              <span className="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">
+                Brand Impact Assessment
+              </span>
+              <div className="grid grid-cols-2 gap-2 text-slate-700 pt-0.5">
+                <div>
+                  <span className="text-slate-500">Brand:</span>
+                  <p className="font-bold text-slate-900">{brandToDelete.name} ({brandToDelete.code})</p>
+                </div>
+                <div>
+                  <span className="text-slate-500">Associated Services:</span>
+                  <p className="font-bold text-slate-900">{brandProcesses.filter((bp) => bp.brand_id === brandToDelete.id).length} service(s)</p>
+                </div>
+                <div>
+                  <span className="text-slate-500">Assigned Primary Agents:</span>
+                  <p className="font-bold text-slate-900">
+                    {assignments.filter((a) => {
+                      const bps = brandProcesses.filter((bp) => bp.brand_id === brandToDelete.id).map((bp) => bp.id);
+                      return bps.includes(a.brand_process_id);
+                    }).length} primary allocation(s)
+                  </p>
+                </div>
+                <div>
+                  <span className="text-slate-500">Roster History Policy:</span>
+                  <p className="font-semibold text-emerald-700">Published rosters remain immutable</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Confirmation Buttons: Red Cancel, Neutral Grey Confirm */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setBrandToDelete(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
               >
-                Cancel
+                Cancel (Esc)
               </button>
               <button
                 type="button"
                 disabled={isDeletingBrand}
                 onClick={handleConfirmDeleteBrand}
-                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+                className="flex items-center gap-1.5 px-5 py-2.5 bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{isDeletingBrand ? 'Deleting...' : 'Confirm & Delete Brand'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Service Confirmation Modal */}
+      {serviceToDelete && (
+        <Modal
+          isOpen={!!serviceToDelete}
+          onClose={() => setServiceToDelete(null)}
+          title="Delete Brand Service"
+          subtitle={`Service: ${serviceToDelete.process_name}`}
+          maxWidth="lg"
+        >
+          <div className="space-y-4 p-1">
+            {/* Mandatory Red Warning */}
+            <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-xl space-y-2 text-rose-950">
+              <div className="flex items-center gap-2 font-black text-rose-800 text-sm tracking-wide">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                <span>WARNING: DELETING THIS SERVICE MAY CAUSE ROSTER CONFLICTS</span>
+              </div>
+              <p className="text-xs leading-relaxed text-rose-900 font-medium">
+                Removing this service may affect existing employee assignments, brand coverage and upcoming scheduling requirements.
+              </p>
+              <p className="text-xs font-black text-rose-950 tracking-wide bg-rose-100/80 p-2 rounded-lg border border-rose-300">
+                Effective roster changes will be applied from the next month.
+              </p>
+            </div>
+
+            {/* Service Impact Breakdown */}
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-2 text-xs">
+              <span className="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">
+                Service Removal Scope
+              </span>
+              <div className="grid grid-cols-2 gap-2 text-slate-700 pt-0.5">
+                <div>
+                  <span className="text-slate-500">Brand:</span>
+                  <p className="font-bold text-slate-900">{brandSchedule?.brand_name || 'Selected Brand'}</p>
+                </div>
+                <div>
+                  <span className="text-slate-500">Service / Process:</span>
+                  <p className="font-bold text-slate-900">{serviceToDelete.process_name} ({serviceToDelete.process_code})</p>
+                </div>
+                <div>
+                  <span className="text-slate-500">Assigned Agents:</span>
+                  <p className="font-bold text-slate-900">
+                    {serviceToDelete.assigned_employees.length > 0
+                      ? serviceToDelete.assigned_employees.map((e: any) => e.name).join(', ')
+                      : 'None'}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-slate-500">Global Process Status:</span>
+                  <p className="font-semibold text-emerald-700">Preserved (only brand link removed)</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Confirmation Buttons: Red Cancel, Neutral Grey Confirm */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setServiceToDelete(null)}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
+              >
+                Cancel (Esc)
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingService}
+                onClick={handleConfirmDeleteService}
+                className="flex items-center gap-1.5 px-5 py-2.5 bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingService ? 'Deleting...' : 'Confirm & Delete Service'}</span>
               </button>
             </div>
           </div>

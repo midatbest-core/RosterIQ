@@ -24,12 +24,52 @@ export const GenerateRosterModal: React.FC<GenerateRosterModalProps> = ({
   onClose,
   onGenerated,
 }) => {
-  const [name, setName] = useState('November 2026 Production Roster');
   const [month, setMonth] = useState(11);
   const [year, setYear] = useState(2026);
+  const [name, setName] = useState('November 2026 Production Roster');
+  const [userEditedName, setUserEditedName] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RosterSummary | null>(null);
+
+  const months = [
+    { value: 1, label: 'January' },
+    { value: 2, label: 'February' },
+    { value: 3, label: 'March' },
+    { value: 4, label: 'April' },
+    { value: 5, label: 'May' },
+    { value: 6, label: 'June' },
+    { value: 7, label: 'July' },
+    { value: 8, label: 'August' },
+    { value: 9, label: 'September' },
+    { value: 10, label: 'October' },
+    { value: 11, label: 'November' },
+    { value: 12, label: 'December' },
+  ];
+
+  const handleMonthChange = (newMonth: number) => {
+    setMonth(newMonth);
+    const mLabel = months.find((m) => m.value === newMonth)?.label || 'Monthly';
+    if (!userEditedName) {
+      setName(`${mLabel} ${year} Production Roster`);
+    } else {
+      // If the user's name has any other month name in it, replace it
+      for (const m of months) {
+        if (name.includes(m.label)) {
+          setName(name.replace(m.label, mLabel));
+          break;
+        }
+      }
+    }
+  };
+
+  const handleYearChange = (newYear: number) => {
+    setYear(newYear);
+    const mLabel = months.find((m) => m.value === month)?.label || 'Monthly';
+    if (!userEditedName) {
+      setName(`${mLabel} ${newYear} Production Roster`);
+    }
+  };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,21 +90,6 @@ export const GenerateRosterModal: React.FC<GenerateRosterModalProps> = ({
     setResult(null);
     onClose();
   };
-
-  const months = [
-    { value: 1, label: 'January' },
-    { value: 2, label: 'February' },
-    { value: 3, label: 'March' },
-    { value: 4, label: 'April' },
-    { value: 5, label: 'May' },
-    { value: 6, label: 'June' },
-    { value: 7, label: 'July' },
-    { value: 8, label: 'August' },
-    { value: 9, label: 'September' },
-    { value: 10, label: 'October' },
-    { value: 11, label: 'November' },
-    { value: 12, label: 'December' },
-  ];
 
   return (
     <Modal
@@ -92,7 +117,10 @@ export const GenerateRosterModal: React.FC<GenerateRosterModalProps> = ({
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setUserEditedName(true);
+                }}
                 required
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white transition-all"
               />
@@ -105,7 +133,7 @@ export const GenerateRosterModal: React.FC<GenerateRosterModalProps> = ({
                 </label>
                 <select
                   value={month}
-                  onChange={(e) => setMonth(Number(e.target.value))}
+                  onChange={(e) => handleMonthChange(Number(e.target.value))}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-hidden focus:border-indigo-500"
                 >
                   {months.map((m) => (
@@ -123,7 +151,7 @@ export const GenerateRosterModal: React.FC<GenerateRosterModalProps> = ({
                 <input
                   type="number"
                   value={year}
-                  onChange={(e) => setYear(Number(e.target.value))}
+                  onChange={(e) => handleYearChange(Number(e.target.value))}
                   min={2024}
                   max={2030}
                   required

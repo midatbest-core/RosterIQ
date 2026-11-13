@@ -24,6 +24,7 @@ import {
   Zap,
   CheckSquare,
   Square,
+  Users,
   AlertCircle,
   HelpCircle,
   TrendingUp,
@@ -798,26 +799,35 @@ export const ConflictsScreen: React.FC<ConflictsScreenProps> = ({
                     <p className="text-xs text-slate-700 leading-relaxed">{c.description}</p>
 
                     {/* Operational Context: Required Skill, Process, Pod, Brand */}
-                    {(c.required_skill || c.process_name || c.pod_name || c.brand_name) && (
-                      <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
-                        {(c.required_skill || c.process_name) && (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 border border-blue-200 text-xs font-semibold">
-                            <span className="text-[10px] uppercase tracking-wider text-blue-500 font-bold">Required Skill / Process:</span>
-                            <span className="font-bold text-blue-900">{c.required_skill || c.process_name}</span>
-                          </div>
-                        )}
-                        {c.pod_name && (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold">
-                            <span className="text-[10px] uppercase tracking-wider text-emerald-500 font-bold">Designated Pod:</span>
-                            <span className="font-bold text-emerald-900">{c.pod_name}</span>
-                          </div>
-                        )}
-                        {c.brand_name && (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-50 text-purple-800 border border-purple-200 text-xs font-semibold">
-                            <span className="text-[10px] uppercase tracking-wider text-purple-500 font-bold">Brand:</span>
-                            <span className="font-bold text-purple-900">{c.brand_name}</span>
-                          </div>
-                        )}
+                    <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 border border-blue-200 text-xs font-semibold">
+                        <span className="text-[10px] uppercase tracking-wider text-blue-500 font-bold">Required Skill:</span>
+                        <span className="font-bold text-blue-900">{c.required_skill || c.process_name || 'Operating Process Skill'}</span>
+                      </div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-200 text-xs font-semibold">
+                        <span className="text-[10px] uppercase tracking-wider text-indigo-500 font-bold">Process:</span>
+                        <span className="font-bold text-indigo-900">{c.process_name || c.required_skill || 'Core Service'}</span>
+                      </div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold">
+                        <span className="text-[10px] uppercase tracking-wider text-emerald-500 font-bold">Designated Pod:</span>
+                        <span className="font-bold text-emerald-900">{c.pod_name || 'Operational Pod Required'}</span>
+                      </div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-50 text-purple-800 border border-purple-200 text-xs font-semibold">
+                        <span className="text-[10px] uppercase tracking-wider text-purple-500 font-bold">Brand:</span>
+                        <span className="font-bold text-purple-900">{c.brand_name || 'Brand Operating Demand'}</span>
+                      </div>
+                    </div>
+
+                    {/* Explicit Needs-Employee banner for Uncovered Demand */}
+                    {c.conflict_type === 'UNCOVERED_SLOT' && (
+                      <div className="p-2 bg-amber-50/90 border border-amber-200 rounded-lg text-[11px] text-amber-950 flex items-center gap-2">
+                        <Users className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>
+                          <strong>Needs Employee:</strong> Requires eligible staff in{' '}
+                          <strong className="text-amber-900 font-bold">{c.pod_name || 'Primary Pod'}</strong> with skill{' '}
+                          <strong className="text-amber-900 font-bold">{c.required_skill || c.process_name || 'Operating Process'}</strong> for{' '}
+                          <strong className="text-amber-900 font-bold">{c.brand_name || 'Brand Service'}</strong>.
+                        </span>
                       </div>
                     )}
 

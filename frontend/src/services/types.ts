@@ -395,6 +395,7 @@ export interface BrandProcessScheduleItem {
   min_staffing_holiday: number;
   overrides: OperatingOverrideItem[];
   assigned_employees: AssignedEmployeeItem[];
+  is_active?: boolean;
 }
 
 export interface BrandOperatingSchedule {

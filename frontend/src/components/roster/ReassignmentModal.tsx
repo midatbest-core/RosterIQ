@@ -69,6 +69,16 @@ export const ReassignmentModal: React.FC<ReassignmentModalProps> = ({
     }
   }, [isOpen, slot, rosterId]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const loadCandidates = async () => {
     if (!slot) return;
     try {
@@ -311,12 +321,12 @@ export const ReassignmentModal: React.FC<ReassignmentModalProps> = ({
           />
         </div>
 
-        {/* Actions */}
+        {/* Actions: Cancel = Red, Confirm = Neutral Grey (never green) */}
         <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg text-xs font-medium cursor-pointer"
+            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
           >
             Cancel
           </button>
@@ -327,7 +337,7 @@ export const ReassignmentModal: React.FC<ReassignmentModalProps> = ({
               !selectedCandidateId ||
               (preview?.requires_ops_manager_approval && !confirmCrossPod)
             }
-            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-xs shadow-indigo-600/30 cursor-pointer disabled:opacity-50"
+            className="flex items-center gap-2 px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50 transition-colors"
           >
             <ArrowRightLeft className="w-3.5 h-3.5" />
             <span>{applying ? 'Applying Reassignment...' : 'Confirm & Apply Reassignment'}</span>

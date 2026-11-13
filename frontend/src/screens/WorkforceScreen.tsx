@@ -54,6 +54,41 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   const [showReoptimizePrompt, setShowReoptimizePrompt] = useState<{ empName: string; podName: string } | null>(null);
   const [isReoptimizing, setIsReoptimizing] = useState(false);
 
+  // Reallocation Impact & Mandatory Warning Modal State (Phase 1)
+  const [reallocationPreview, setReallocationPreview] = useState<{
+    employee_id: string;
+    employee_name: string;
+    current_pod_name: string;
+    target_pod_id: string | null;
+    target_pod_name: string;
+    is_cross_pod: boolean;
+    requires_ops_manager_approval: boolean;
+    affected_services: Array<{ brand_name: string; process_name: string; brand_process_id: string }>;
+    affected_services_count: number;
+    employee_skills: string[];
+    approved_leaves_count: number;
+    existing_allocations_count: number;
+    warning: string;
+  } | null>(null);
+  const [loadingReallocPreview, setLoadingReallocPreview] = useState(false);
+
+  // Employee Deletion Modal State (Phase 2)
+  const [empToDelete, setEmpToDelete] = useState<Employee | null>(null);
+  const [empDeletionImpact, setEmpDeletionImpact] = useState<{
+    employee_id: string;
+    employee_name: string;
+    employee_code: string;
+    pod_name: string;
+    active_services: Array<{ brand_name: string; process_name: string; brand_process_id: string; priority: number }>;
+    active_services_count: number;
+    draft_rosters_affected_count: number;
+    has_published_history: boolean;
+    published_allocations_count: number;
+    historical_records_preserved: boolean;
+  } | null>(null);
+  const [loadingDeletionImpact, setLoadingDeletionImpact] = useState(false);
+  const [isDeletingEmp, setIsDeletingEmp] = useState(false);
+
   // Delete Pod Modal State
   const [podToDelete, setPodToDelete] = useState<Pod | null>(null);
   const [isDeletingPod, setIsDeletingPod] = useState(false);
@@ -87,6 +122,31 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   useEffect(() => {
     loadWorkforceData();
   }, []);
+
+  // Handle Escape key to cancel/dismiss modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showRelocateModal) {
+          setShowRelocateModal(false);
+          setRelocatingEmp(null);
+          setReallocationPreview(null);
+        }
+        if (empToDelete) {
+          setEmpToDelete(null);
+          setEmpDeletionImpact(null);
+        }
+        if (podToDelete) {
+          setPodToDelete(null);
+        }
+        if (showReoptimizePrompt) {
+          setShowReoptimizePrompt(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showRelocateModal, empToDelete, podToDelete, showReoptimizePrompt]);
 
   const loadWorkforceData = async () => {
     try {
@@ -159,32 +219,70 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
     }
   };
 
-  const handleRelocateFromDrawer = async () => {
-    if (!selectedEmp || !drawerPodTarget || drawerPodTarget === selectedEmp.pod_id) return;
+  const handleOpenDeleteEmpModal = async (emp: Employee) => {
+    setEmpToDelete(emp);
+    setLoadingDeletionImpact(true);
     try {
-      setIsRelocating(true);
-      await api.relocateEmployee(selectedEmp.id, drawerPodTarget);
-      const targetPod = pods.find((p) => p.id === drawerPodTarget);
-      const empName = selectedEmp.name;
-      const podName = targetPod?.name || 'New Pod';
-      setIsEmpDrawerOpen(false);
-      await loadWorkforceData();
-      setShowReoptimizePrompt({
-        empName: empName,
-        podName: podName,
-      });
+      const impact = await api.getEmployeeDeletionImpact(emp.id);
+      setEmpDeletionImpact(impact);
     } catch (err: any) {
-      alert(err.message || 'Failed to relocate employee');
+      console.error(err);
     } finally {
-      setIsRelocating(false);
+      setLoadingDeletionImpact(false);
     }
   };
 
-  const handleOpenRelocateModal = (emp: Employee) => {
+  const handleConfirmDeleteEmp = async () => {
+    if (!empToDelete) return;
+    try {
+      setIsDeletingEmp(true);
+      const res = await api.deleteEmployee(empToDelete.id);
+      const deletedName = empToDelete.name;
+      setEmpToDelete(null);
+      setEmpDeletionImpact(null);
+      setIsEmpDrawerOpen(false);
+      setSelectedEmp(null);
+      await loadWorkforceData();
+      setShowReoptimizePrompt({
+        empName: deletedName,
+        podName: 'Deactivated / Removed',
+      });
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete employee');
+    } finally {
+      setIsDeletingEmp(false);
+    }
+  };
+
+  const handlePreviewReallocation = async (emp: Employee, podId: string) => {
+    try {
+      setLoadingReallocPreview(true);
+      const prev = await api.getEmployeeReallocationPreview(emp.id, podId);
+      setReallocationPreview(prev);
+    } catch (err: any) {
+      console.error('Failed to fetch reallocation preview:', err);
+    } finally {
+      setLoadingReallocPreview(false);
+    }
+  };
+
+  const handleRelocateFromDrawer = async () => {
+    if (!selectedEmp || !drawerPodTarget || drawerPodTarget === selectedEmp.pod_id) return;
+    setRelocatingEmp(selectedEmp);
+    setTargetPodId(drawerPodTarget);
+    setShowRelocateModal(true);
+    await handlePreviewReallocation(selectedEmp, drawerPodTarget);
+  };
+
+  const handleOpenRelocateModal = async (emp: Employee) => {
     setRelocatingEmp(emp);
     const otherPod = pods.find((p) => p.id !== emp.pod_id);
-    setTargetPodId(otherPod?.id || '');
+    const nextPodId = otherPod?.id || '';
+    setTargetPodId(nextPodId);
     setShowRelocateModal(true);
+    if (nextPodId) {
+      await handlePreviewReallocation(emp, nextPodId);
+    }
   };
 
   const handleConfirmRelocate = async () => {
@@ -197,6 +295,8 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
       const podName = targetPod?.name || 'New Pod';
       setShowRelocateModal(false);
       setRelocatingEmp(null);
+      setReallocationPreview(null);
+      setIsEmpDrawerOpen(false);
       await loadWorkforceData();
       setShowReoptimizePrompt({
         empName: empName,
@@ -231,9 +331,13 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
     try {
       setIsDeletingPod(true);
       const res = await api.deletePod(podToDelete.id);
+      const podName = podToDelete.name;
       setPodToDelete(null);
       await loadWorkforceData();
-      alert(res.message || 'Pod deleted and members relocated successfully.');
+      setShowReoptimizePrompt({
+        empName: `Members of ${podName}`,
+        podName: 'Least Occupied Pod',
+      });
     } catch (err: any) {
       alert(err.message || 'Failed to delete pod');
     } finally {
@@ -668,6 +772,25 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
         width="lg"
       >
         <div className="space-y-6">
+          {/* Header Action Bar with Delete Employee Button */}
+          {!isPodLead && selectedEmp && (
+            <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200/80 rounded-xl">
+              <div>
+                <span className="text-xs font-semibold text-slate-700">Account Lifecycle</span>
+                <p className="text-[11px] text-slate-400">Soft deactivation preserves history & audit logs</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenDeleteEmpModal(selectedEmp)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                title="Delete Employee"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Delete Employee</span>
+              </button>
+            </div>
+          )}
+
           {/* Shift & Capacity Details */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2 text-xs">
             <span className="font-bold text-slate-900 uppercase tracking-wider text-[10px]">
@@ -847,53 +970,248 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
         </div>
       </DetailDrawer>
 
-      {/* Quick Relocate Modal */}
+      {/* Quick Relocate Modal (Phase 1) */}
       {showRelocateModal && relocatingEmp && (
         <Modal
           isOpen={showRelocateModal}
           onClose={() => {
             setShowRelocateModal(false);
             setRelocatingEmp(null);
+            setReallocationPreview(null);
           }}
-          title={`Relocate ${relocatingEmp.name}`}
+          title={`Reallocate ${relocatingEmp.name}`}
           subtitle={`Current Pod: ${pods.find((p) => p.id === relocatingEmp.pod_id)?.name || 'Unassigned'}`}
-          maxWidth="sm"
+          maxWidth="md"
         >
-          <div className="space-y-4">
+          <div className="space-y-4 p-1">
+            {/* Mandatory Confirmation Warning (Bold RED) */}
+            <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-xl space-y-2 text-rose-950">
+              <div className="flex items-center gap-2 text-rose-700 font-extrabold text-xs uppercase tracking-wide">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>WARNING: THIS REALLOCATION MAY AFFECT BRAND SERVICES</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-rose-900 font-medium">
+                Reallocating an employee between operational pods can alter process staffing, shift coverage, and weekly allocations. Any affected draft rosters will be invalidated and marked stale.
+              </p>
+            </div>
+
+            {/* Target Pod Selector */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Target Operational Pod
               </label>
               <select
                 value={targetPodId}
-                onChange={(e) => setTargetPodId(e.target.value)}
+                onChange={async (e) => {
+                  const newPodId = e.target.value;
+                  setTargetPodId(newPodId);
+                  if (relocatingEmp && newPodId) {
+                    await handlePreviewReallocation(relocatingEmp, newPodId);
+                  }
+                }}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
               >
-                {pods.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} {p.id === relocatingEmp.pod_id ? '(Current)' : ''}
-                  </option>
-                ))}
+                {pods
+                  .filter((p) => !isPodLead || p.id === currentUser?.pod_id)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.id === relocatingEmp.pod_id ? '(Current)' : ''}
+                    </option>
+                  ))}
               </select>
+              {isPodLead && (
+                <p className="text-[10px] text-amber-700 mt-1 font-medium">
+                  Pod Leads are strictly restricted to reallocating within their authorized pod. Cross-pod moves require an Operations Manager.
+                </p>
+              )}
             </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+
+            {/* Reallocation Impact Preview */}
+            {loadingReallocPreview ? (
+              <div className="p-4 text-center text-xs text-slate-400">Loading reallocation impact preview...</div>
+            ) : reallocationPreview ? (
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs text-slate-700">
+                <div className="flex items-center justify-between font-bold text-slate-900 border-b border-slate-200 pb-1.5">
+                  <span>Impact Analysis Preview</span>
+                  {reallocationPreview.is_cross_pod ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
+                      Cross-Pod Move
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                      Internal Pod Move
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div>
+                    <span className="text-slate-500">Current Pod:</span>{' '}
+                    <strong className="text-slate-800">{reallocationPreview.current_pod_name}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Target Pod:</span>{' '}
+                    <strong className="text-slate-800">{reallocationPreview.target_pod_name}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Approved Leaves:</span>{' '}
+                    <strong className="text-slate-800">{reallocationPreview.approved_leaves_count} recorded</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Existing Allocations:</span>{' '}
+                    <strong className="text-slate-800">{reallocationPreview.existing_allocations_count} active</strong>
+                  </div>
+                </div>
+
+                {reallocationPreview.affected_services_count > 0 && (
+                  <div className="pt-1.5 border-t border-slate-200">
+                    <span className="text-slate-500 text-[11px] font-semibold block mb-1">
+                      Affected Brand Services ({reallocationPreview.affected_services_count}):
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {reallocationPreview.affected_services.map((s, idx) => (
+                        <span key={idx} className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] text-slate-700">
+                          {s.brand_name} &bull; {s.process_name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {reallocationPreview.employee_skills.length > 0 && (
+                  <div className="pt-1.5 border-t border-slate-200">
+                    <span className="text-slate-500 text-[11px] font-semibold block mb-1">
+                      Employee Skills & Eligibility:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {reallocationPreview.employee_skills.map((skill, idx) => (
+                        <span key={idx} className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-medium">
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {/* Buttons: Cancel = Red, Confirm = Neutral Grey */}
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => {
                   setShowRelocateModal(false);
                   setRelocatingEmp(null);
+                  setReallocationPreview(null);
                 }}
-                className="px-3.5 py-1.5 border rounded-lg text-xs font-medium cursor-pointer"
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={isRelocating || targetPodId === relocatingEmp.pod_id}
+                disabled={isRelocating || targetPodId === relocatingEmp.pod_id || (isPodLead && targetPodId !== currentUser?.pod_id)}
                 onClick={handleConfirmRelocate}
-                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs transition-colors"
+                className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
               >
-                {isRelocating ? 'Relocating...' : 'Confirm Relocation'}
+                {isRelocating ? 'Reallocating...' : 'Confirm Reallocation'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Employee Confirmation Modal (Phase 2) */}
+      {empToDelete && (
+        <Modal
+          isOpen={!!empToDelete}
+          onClose={() => {
+            setEmpToDelete(null);
+            setEmpDeletionImpact(null);
+          }}
+          title="Deactivate & Delete Employee"
+          subtitle={`Account lifecycle termination for ${empToDelete.name}`}
+          maxWidth="md"
+        >
+          <div className="space-y-4 p-1">
+            {/* Bold RED Warning Box */}
+            <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-xl space-y-2 text-rose-950">
+              <div className="flex items-center gap-2 text-rose-700 font-extrabold text-xs uppercase tracking-wide">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>WARNING: DELETING THIS EMPLOYEE MAY CAUSE SCHEDULING CONFLICTS</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-rose-900 font-medium">
+                Deactivating an employee removes them from future operational availability and unassigns active primary services. Historical published rosters remain preserved for audit compliance.
+              </p>
+            </div>
+
+            {/* Impact Details */}
+            {loadingDeletionImpact ? (
+              <div className="p-6 text-center text-xs text-slate-500">Calculating deletion impact...</div>
+            ) : (
+              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200/80 text-xs">
+                <div className="grid grid-cols-2 gap-3 text-slate-700">
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-semibold">Employee</span>
+                    <span className="font-bold text-slate-900">{empToDelete.name} ({empToDelete.employee_code})</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-semibold">Current Pod</span>
+                    <span className="font-bold text-slate-900">
+                      {empDeletionImpact?.pod_name || pods.find((p) => p.id === empToDelete.pod_id)?.name || 'Unassigned'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-semibold">Active Services</span>
+                    <span className="font-bold text-slate-900">{empDeletionImpact?.active_services_count || 0} service(s)</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-semibold">Draft Rosters Impacted</span>
+                    <span className="font-bold text-rose-600">{empDeletionImpact?.draft_rosters_affected_count || 0} draft(s) (Marked Stale)</span>
+                  </div>
+                </div>
+
+                {empDeletionImpact?.active_services && empDeletionImpact.active_services.length > 0 && (
+                  <div className="pt-2 border-t border-slate-200">
+                    <span className="text-slate-500 text-[11px] font-semibold block mb-1">Assigned Brand Services:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {empDeletionImpact.active_services.map((s, idx) => (
+                        <span key={idx} className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px] text-slate-700">
+                          {s.brand_name} &bull; {s.process_name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-200 flex items-center gap-2 text-[11px] text-emerald-800 bg-emerald-50/60 p-2 rounded-lg border border-emerald-200">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    <strong>History Preserved:</strong> {empDeletionImpact?.published_allocations_count || 0} published allocations retained. Historical rosters remain immutable.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Actions: Cancel = Red, Confirm = Neutral Grey */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmpToDelete(null);
+                  setEmpDeletionImpact(null);
+                }}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingEmp || loadingDeletionImpact}
+                onClick={handleConfirmDeleteEmp}
+                className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
+              >
+                {isDeletingEmp ? 'Deactivating...' : 'Confirm Deactivation'}
               </button>
             </div>
           </div>

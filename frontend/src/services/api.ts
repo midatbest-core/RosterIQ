@@ -206,6 +206,40 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ pod_id: podId }),
     }),
+  getEmployeeDeletionImpact: (employeeId: string) =>
+    request<{
+      employee_id: string;
+      employee_name: string;
+      employee_code: string;
+      pod_name: string;
+      active_services: Array<{ brand_name: string; process_name: string; brand_process_id: string; priority: number }>;
+      active_services_count: number;
+      draft_rosters_affected_count: number;
+      has_published_history: boolean;
+      published_allocations_count: number;
+      historical_records_preserved: boolean;
+    }>(`/employees/${employeeId}/deletion-impact`),
+  deleteEmployee: (employeeId: string) =>
+    request<{ status: string; message: string; employee_name?: string }>(`/employees/${employeeId}`, {
+      method: 'DELETE',
+    }),
+  getEmployeeReallocationPreview: (employeeId: string, targetPodId?: string) =>
+    request<{
+      employee_id: string;
+      employee_name: string;
+      current_pod_id: string | null;
+      current_pod_name: string;
+      target_pod_id: string | null;
+      target_pod_name: string;
+      is_cross_pod: boolean;
+      requires_ops_manager_approval: boolean;
+      affected_services: Array<{ brand_name: string; process_name: string; brand_process_id: string }>;
+      affected_services_count: number;
+      employee_skills: string[];
+      approved_leaves_count: number;
+      existing_allocations_count: number;
+      warning: string;
+    }>(`/employees/${employeeId}/reallocation-preview${targetPodId ? `?target_pod_id=${targetPodId}` : ''}`),
 
   // Availability & Leaves
   getEmployeeUnavailability: (employeeId: string) =>
@@ -263,6 +297,15 @@ export const api = {
     request<BrandProcess>('/brand-processes', {
       method: 'POST',
       body: JSON.stringify({ brand_id, process_id }),
+    }),
+  toggleBrandService: (bpId: string, isActive: boolean) =>
+    request<BrandProcess>(`/brand-processes/${bpId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: isActive }),
+    }),
+  deleteBrandService: (bpId: string) =>
+    request<{ status: string; message: string; service_name?: string }>(`/brand-processes/${bpId}`, {
+      method: 'DELETE',
     }),
 
   getAssignments: () => request<PrimaryAssignment[]>('/assignments'),

@@ -104,7 +104,7 @@ def get_brand_operating_schedule(brand_id: UUID, db: Session = Depends(get_db)):
     from app.modules.workforce.models import Pod
 
     bps = db.scalars(
-        select(BrandProcess).where(BrandProcess.brand_id == brand_id, BrandProcess.is_active == True)
+        select(BrandProcess).where(BrandProcess.brand_id == brand_id)
     ).all()
 
     processes_data = []
@@ -171,6 +171,7 @@ def get_brand_operating_schedule(brand_id: UUID, db: Session = Depends(get_db)):
                 for o in overrides
             ],
             "assigned_employees": assigned_emps,
+            "is_active": bp.is_active,
         })
 
     return {
@@ -229,7 +230,15 @@ def delete_brand(brand_id: UUID, db: Session = Depends(get_db)) -> dict[str, Any
     for u in users:
         u.brand_id = None
         
-    # 5. Delete the Brand
+    # 5. Mark affected draft rosters as STALE (published rosters remain immutable)
+    from app.modules.roster.models import Roster, RosterStatus
+    draft_rosters = db.scalars(
+        select(Roster).where(Roster.status.in_([RosterStatus.DRAFT, RosterStatus.VALIDATED]))
+    ).all()
+    for r in draft_rosters:
+        r.status = RosterStatus.STALE
+
+    # 6. Delete the Brand
     db.delete(brand)
     db.commit()
     
@@ -238,7 +247,7 @@ def delete_brand(brand_id: UUID, db: Session = Depends(get_db)) -> dict[str, Any
         "deleted_brand_id": str(brand_id),
         "deleted_brand_name": brand_name,
         "deleted_processes_count": len(bp_ids),
-        "message": f"Brand '{brand_name}' and all associated processes deleted successfully.",
+        "message": f"Brand '{brand_name}' and all associated processes deleted successfully. Effective from next month.",
     }
 
 
@@ -367,16 +376,58 @@ def update_brand_process(
     validate_holiday_policy(data, item)
     for field, value in data.items():
         setattr(item, field, value)
+    
+    if "is_active" in data:
+        from app.modules.roster.models import Roster, RosterStatus
+        draft_rosters = db.scalars(
+            select(Roster).where(Roster.status.in_([RosterStatus.DRAFT, RosterStatus.VALIDATED]))
+        ).all()
+        for r in draft_rosters:
+            r.status = RosterStatus.STALE
+
     db.commit()
     db.refresh(item)
     return item
 
 
-@router.delete("/brand-processes/{brand_process_id}", status_code=204, dependencies=mutation_dependencies)
-def deactivate_brand_process(brand_process_id: UUID, db: Session = Depends(get_db)) -> None:
+@router.delete("/brand-processes/{brand_process_id}", dependencies=mutation_dependencies)
+def delete_brand_process(brand_process_id: UUID, db: Session = Depends(get_db)) -> dict[str, Any]:
     item = require_record(db, BrandProcess, brand_process_id, "BRAND_PROCESS_NOT_FOUND", "Brand-process")
-    item.is_active = False
+    proc = db.get(Process, item.process_id)
+    brand = db.get(Brand, item.brand_id)
+    proc_name = proc.name if proc else "Service"
+    brand_name = brand.name if brand else "Brand"
+
+    from app.modules.operations.pattern_models import OperatingPattern, OperatingOverride
+    from app.modules.operations.models import PrimaryAssignment
+    from app.modules.roster.models import Roster, RosterAllocation, RosterConflict, RosterStatus
+
+    # 1. Clean up child patterns, overrides, assignments, and draft allocations for this brand process
+    db.execute(delete(PrimaryAssignment).where(PrimaryAssignment.brand_process_id == brand_process_id))
+    db.execute(delete(OperatingPattern).where(OperatingPattern.brand_process_id == brand_process_id))
+    db.execute(delete(OperatingOverride).where(OperatingOverride.brand_process_id == brand_process_id))
+    db.execute(delete(RosterAllocation).where(RosterAllocation.brand_process_id == brand_process_id))
+    db.execute(delete(RosterConflict).where(RosterConflict.brand_process_id == brand_process_id))
+
+    # 2. Delete the BrandProcess link (keeps global Process intact)
+    db.delete(item)
+
+    # 3. Mark affected draft rosters as STALE
+    draft_rosters = db.scalars(
+        select(Roster).where(Roster.status.in_([RosterStatus.DRAFT, RosterStatus.VALIDATED]))
+    ).all()
+    for r in draft_rosters:
+        r.status = RosterStatus.STALE
+
     db.commit()
+
+    return {
+        "status": "SUCCESS",
+        "deleted_brand_process_id": str(brand_process_id),
+        "service_name": proc_name,
+        "brand_name": brand_name,
+        "message": f"Service '{proc_name}' for brand '{brand_name}' deleted successfully. Effective from next month.",
+    }
 
 
 def validate_assignment_references(db: Session, employee_id: UUID, brand_process_id: UUID) -> None:

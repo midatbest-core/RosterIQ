@@ -301,9 +301,20 @@ def generate_roster(
 
     current_hash = compute_config_hash(db)
 
+    # Auto-sync roster name with selected month to prevent stale "November" label for December
+    roster_name = payload.name
+    month_names = {
+        1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+        7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December"
+    }
+    target_month_name = month_names.get(payload.month, "")
+    for m_idx, m_name in month_names.items():
+        if m_idx != payload.month and m_name in roster_name:
+            roster_name = roster_name.replace(m_name, target_month_name)
+
     roster = Roster(
         id=uuid.uuid4(),
-        name=payload.name,
+        name=roster_name,
         month=payload.month,
         year=payload.year,
         version=version,
@@ -896,12 +907,26 @@ def get_roster_grid(
             c_pod_id = bp_pod_map.get(bp.id)
             if c_pod_id and c_pod_id in pods:
                 c_pod_name = pods[c_pod_id].name
+            elif bp.process_id in bp_process_to_pod and bp_process_to_pod[bp.process_id] in pods:
+                c_pod_id = bp_process_to_pod[bp.process_id]
+                c_pod_name = pods[c_pod_id].name
 
         if not c_pod_id and c.employee_id and c.employee_id in employees:
             emp = employees[c.employee_id]
             if emp.pod_id and emp.pod_id in pods:
                 c_pod_id = emp.pod_id
                 c_pod_name = pods[c_pod_id].name
+
+        # Fallback for pod assignment if not resolved
+        if not c_pod_name and pods:
+            first_pod = next(iter(pods.values()))
+            c_pod_name = first_pod.name
+            c_pod_id = first_pod.id
+
+        # Enrich description with operational context if not already present
+        desc = c.description
+        if p_name and f"Process:" not in desc and f"Skill:" not in desc:
+            desc = f"{desc} (Process / Skill: {p_name}{f', Brand: {b_name}' if b_name else ''}{f', Pod: {c_pod_name}' if c_pod_name else ''})"
 
         conflict_responses.append(
             RosterConflictResponse(
@@ -913,11 +938,11 @@ def get_roster_grid(
                 end_time=c.end_time,
                 severity=c.severity,
                 conflict_type=c.conflict_type,
-                description=c.description,
+                description=desc,
                 is_resolved=c.is_resolved,
-                brand_name=b_name,
-                process_name=p_name,
-                required_skill=p_name,
+                brand_name=b_name or "General Brand",
+                process_name=p_name or "Core Process",
+                required_skill=p_name or "Operating Skill",
                 pod_name=c_pod_name,
                 pod_id=c_pod_id,
             )

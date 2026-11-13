@@ -197,3 +197,104 @@ def test_roster_conflicts_display_skill_pod_and_process(authenticated_client: Te
     assert c_item["required_skill"] == proc.name
     assert c_item["pod_name"] == pod.name
     assert c_item["pod_id"] == str(pod.id)
+
+
+def test_employee_deletion_impact_and_soft_delete(authenticated_client: TestClient, db_session: Session):
+    headers = csrf_headers(authenticated_client)
+
+    pod = Pod(name=f"ImpactPod_{uuid.uuid4().hex[:6]}")
+    brand = Brand(name=f"ImpactBrand_{uuid.uuid4().hex[:6]}", code=f"IB_{uuid.uuid4().hex[:4]}")
+    proc = Process(name=f"ImpactProc_{uuid.uuid4().hex[:6]}", code=f"IP_{uuid.uuid4().hex[:4]}")
+    db_session.add_all([pod, brand, proc])
+    db_session.commit()
+
+    bp = BrandProcess(brand_id=brand.id, process_id=proc.id, is_active=True)
+    db_session.add(bp)
+    db_session.commit()
+
+    emp = Employee(
+        employee_code=f"EMP_{uuid.uuid4().hex[:6]}",
+        name="Impact Employee",
+        email=f"impact_{uuid.uuid4().hex[:6]}@example.com",
+        pod_id=pod.id,
+        standard_start_time=time(9, 0),
+        standard_end_time=time(18, 0),
+        daily_capacity_minutes=540,
+        status=EmployeeStatus.ACTIVE,
+    )
+    db_session.add(emp)
+    db_session.commit()
+
+    pa = PrimaryAssignment(
+        employee_id=emp.id,
+        brand_process_id=bp.id,
+        priority=1,
+        effective_from=date(2026, 11, 1),
+        is_active=True,
+    )
+    db_session.add(pa)
+    db_session.commit()
+
+    # 1. Check deletion impact
+    resp = authenticated_client.get(f"/api/v1/employees/{emp.id}/deletion-impact")
+    assert resp.status_code == 200
+    impact = resp.json()
+    assert impact["employee_id"] == str(emp.id)
+    assert impact["active_services_count"] == 1
+    assert impact["historical_records_preserved"] is True
+
+    # 2. Reallocation preview
+    pod2 = Pod(name=f"TargetPod_{uuid.uuid4().hex[:6]}")
+    db_session.add(pod2)
+    db_session.commit()
+
+    prev_resp = authenticated_client.get(f"/api/v1/employees/{emp.id}/reallocation-preview?target_pod_id={pod2.id}")
+    assert prev_resp.status_code == 200
+    prev_data = prev_resp.json()
+    assert prev_data["is_cross_pod"] is True
+    assert prev_data["requires_ops_manager_approval"] is True
+
+    # 3. Perform soft delete
+    del_resp = authenticated_client.delete(f"/api/v1/employees/{emp.id}", headers=headers)
+    assert del_resp.status_code == 200
+    del_data = del_resp.json()
+    assert del_data["status"] == "SUCCESS"
+    assert del_data["new_status"] == "INACTIVE"
+
+    # Verify DB status is INACTIVE
+    db_session.refresh(emp)
+    assert emp.status == EmployeeStatus.INACTIVE
+
+
+def test_brand_service_toggle_and_delete(authenticated_client: TestClient, db_session: Session):
+    headers = csrf_headers(authenticated_client)
+
+    brand = Brand(name=f"SvcBrand_{uuid.uuid4().hex[:6]}", code=f"SB_{uuid.uuid4().hex[:4]}")
+    proc = Process(name=f"SvcProc_{uuid.uuid4().hex[:6]}", code=f"SP_{uuid.uuid4().hex[:4]}")
+    db_session.add_all([brand, proc])
+    db_session.commit()
+
+    bp = BrandProcess(brand_id=brand.id, process_id=proc.id, is_active=True)
+    db_session.add(bp)
+    db_session.commit()
+
+    # 1. Toggle service to inactive (disable service)
+    patch_resp = authenticated_client.patch(
+        f"/api/v1/brand-processes/{bp.id}",
+        json={"is_active": False},
+        headers=headers,
+    )
+    assert patch_resp.status_code == 200
+    patch_data = patch_resp.json()
+    assert patch_data["is_active"] is False
+
+    # 2. Delete service link
+    del_resp = authenticated_client.delete(f"/api/v1/brand-processes/{bp.id}", headers=headers)
+    assert del_resp.status_code == 200
+    del_data = del_resp.json()
+    assert del_data["status"] == "SUCCESS"
+
+    # Global process remains intact
+    db_proc = db_session.get(Process, proc.id)
+    assert db_proc is not None
+

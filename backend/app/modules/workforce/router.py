@@ -283,12 +283,121 @@ def get_employee(
     return employee
 
 
+@router.get("/employees/{employee_id}/reallocation-preview", dependencies=[Depends(require_lead_or_manager)])
+def get_employee_reallocation_preview(
+    employee_id: UUID,
+    target_pod_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_lead_or_manager),
+) -> dict[str, Any]:
+    employee = require_employee(db, employee_id)
+    check_employee_pod_scope(current_user, employee)
+
+    if current_user.role == UserRole.POD_LEAD and current_user.pod_id:
+        if target_pod_id and target_pod_id != current_user.pod_id:
+            raise AppError("FORBIDDEN", "Pod Leads cannot reallocate employees to another pod.", 403)
+
+    current_pod = db.get(Pod, employee.pod_id) if employee.pod_id else None
+    target_pod = db.get(Pod, target_pod_id) if target_pod_id else None
+
+    # 1. Brand coverage & primary assignments
+    from app.modules.operations.models import Brand, BrandProcess, PrimaryAssignment
+    from app.modules.roster.models import RosterAllocation
+    from app.modules.workforce.availability_models import EmployeeUnavailability
+
+    primaries = db.scalars(
+        select(PrimaryAssignment)
+        .where(PrimaryAssignment.employee_id == employee_id, PrimaryAssignment.is_active == True)
+    ).all()
+
+    services = []
+    for pa in primaries:
+        bp = db.get(BrandProcess, pa.brand_process_id)
+        if bp:
+            b = db.get(Brand, bp.brand_id)
+            p = db.get(Process, bp.process_id)
+            services.append({
+                "brand_name": b.name if b else "Brand",
+                "process_name": p.name if p else "Process",
+                "brand_process_id": str(bp.id),
+            })
+
+    # 2. Approved leaves
+    leaves_count = db.scalar(
+        select(func.count(EmployeeUnavailability.id))
+        .where(EmployeeUnavailability.employee_id == employee_id, EmployeeUnavailability.is_approved == True)
+    ) or 0
+
+    # 3. Existing draft allocations
+    allocs_count = db.scalar(
+        select(func.count(RosterAllocation.id)).where(RosterAllocation.employee_id == employee_id)
+    ) or 0
+
+    # 4. Employee skills
+    skills = db.scalars(
+        select(EmployeeProcessSkill).where(EmployeeProcessSkill.employee_id == employee_id, EmployeeProcessSkill.is_active == True)
+    ).all()
+    skill_names = []
+    for s in skills:
+        proc = db.get(Process, s.process_id)
+        if proc:
+            skill_names.append(proc.name)
+
+    is_cross_pod = bool(target_pod_id and target_pod_id != employee.pod_id)
+
+    return {
+        "employee_id": str(employee.id),
+        "employee_name": employee.name,
+        "current_pod_id": str(employee.pod_id) if employee.pod_id else None,
+        "current_pod_name": current_pod.name if current_pod else "Unassigned",
+        "target_pod_id": str(target_pod.id) if target_pod else None,
+        "target_pod_name": target_pod.name if target_pod else "Unassigned",
+        "is_cross_pod": is_cross_pod,
+        "requires_ops_manager_approval": is_cross_pod,
+        "affected_services": services,
+        "affected_services_count": len(services),
+        "employee_skills": skill_names,
+        "approved_leaves_count": leaves_count,
+        "existing_allocations_count": allocs_count,
+        "warning": (
+            "WARNING: THIS REALLOCATION MAY AFFECT BRAND SERVICES. "
+            "Reassigning this employee may cause staffing shortages or scheduling violations in the services currently supported by the employee."
+        ),
+    }
+
+
 @router.patch("/employees/{employee_id}", response_model=EmployeeRead, dependencies=mutation_dependencies)
-def update_employee(employee_id: UUID, payload: EmployeeUpdate, db: Session = Depends(get_db)) -> Employee:
+def update_employee(
+    employee_id: UUID,
+    payload: EmployeeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_lead_or_manager),
+) -> Employee:
     employee = require_employee(db, employee_id)
     data = payload.model_dump(exclude_unset=True)
-    if "pod_id" in data:
+
+    if current_user.role == UserRole.POD_LEAD and current_user.pod_id:
+        if employee.pod_id != current_user.pod_id or ("pod_id" in data and data["pod_id"] != current_user.pod_id):
+            raise AppError("FORBIDDEN", "Pod Leads cannot reallocate employees to another pod.", 403)
+
+    if "pod_id" in data and data["pod_id"] is not None:
         validate_pod(db, data["pod_id"])
+
+    # If pod changed, update linked user record too
+    if "pod_id" in data and data["pod_id"] != employee.pod_id:
+        from app.modules.roster.models import Roster, RosterStatus
+        db.execute(
+            update(User)
+            .where(User.employee_id == employee_id)
+            .values(pod_id=data["pod_id"])
+        )
+        # Mark draft rosters as STALE
+        draft_rosters = db.scalars(
+            select(Roster).where(Roster.status.in_([RosterStatus.DRAFT, RosterStatus.VALIDATED]))
+        ).all()
+        for r in draft_rosters:
+            r.status = RosterStatus.STALE
+
     if data.get("employee_code"):
         data["employee_code"] = data["employee_code"].upper()
     if data.get("email"):
@@ -304,11 +413,99 @@ def update_employee(employee_id: UUID, payload: EmployeeUpdate, db: Session = De
     return employee
 
 
-@router.delete("/employees/{employee_id}", status_code=204, dependencies=mutation_dependencies)
-def deactivate_employee(employee_id: UUID, db: Session = Depends(get_db)) -> None:
+@router.get("/employees/{employee_id}/deletion-impact", dependencies=[Depends(require_lead_or_manager)])
+def get_employee_deletion_impact(
+    employee_id: UUID,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_lead_or_manager),
+) -> dict[str, Any]:
     employee = require_employee(db, employee_id)
+    check_employee_pod_scope(_user, employee)
+
+    pod = db.get(Pod, employee.pod_id) if employee.pod_id else None
+
+    # 1. Active brand/process assignments
+    from app.modules.operations.models import Brand, BrandProcess, PrimaryAssignment
+    from app.modules.roster.models import Roster, RosterAllocation, RosterStatus
+
+    primaries = db.scalars(
+        select(PrimaryAssignment)
+        .where(PrimaryAssignment.employee_id == employee_id, PrimaryAssignment.is_active == True)
+    ).all()
+
+    assigned_services = []
+    for pa in primaries:
+        bp = db.get(BrandProcess, pa.brand_process_id)
+        if bp:
+            b = db.get(Brand, bp.brand_id)
+            p = db.get(Process, bp.process_id)
+            assigned_services.append({
+                "brand_process_id": str(bp.id),
+                "brand_name": b.name if b else "Brand",
+                "process_name": p.name if p else "Process",
+                "priority": pa.priority,
+            })
+
+    # 2. Upcoming draft roster impact
+    draft_rosters = db.scalars(
+        select(Roster).where(Roster.status.in_([RosterStatus.DRAFT, RosterStatus.VALIDATED]))
+    ).all()
+
+    # 3. Published historical allocations count
+    pub_allocs_count = db.scalar(
+        select(func.count(RosterAllocation.id))
+        .join(Roster, RosterAllocation.roster_id == Roster.id)
+        .where(RosterAllocation.employee_id == employee_id, Roster.status == RosterStatus.PUBLISHED)
+    ) or 0
+
+    return {
+        "employee_id": str(employee_id),
+        "employee_name": employee.name,
+        "employee_code": employee.employee_code,
+        "pod_name": pod.name if pod else "Unassigned",
+        "active_services": assigned_services,
+        "active_services_count": len(assigned_services),
+        "draft_rosters_affected_count": len(draft_rosters),
+        "has_published_history": pub_allocs_count > 0,
+        "published_allocations_count": pub_allocs_count,
+        "historical_records_preserved": True,
+    }
+
+
+@router.delete("/employees/{employee_id}", dependencies=mutation_dependencies)
+def deactivate_employee(employee_id: UUID, db: Session = Depends(get_db)) -> dict[str, Any]:
+    employee = require_employee(db, employee_id)
+    emp_name = employee.name
+    
+    # 1. Soft deletion / deactivation
     employee.status = EmployeeStatus.INACTIVE
+
+    # 2. Deactivate primary assignments for this employee
+    from app.modules.operations.models import PrimaryAssignment
+    from app.modules.roster.models import Roster, RosterStatus
+
+    db.execute(
+        update(PrimaryAssignment)
+        .where(PrimaryAssignment.employee_id == employee_id)
+        .values(is_active=False)
+    )
+
+    # 3. Mark affected draft rosters as STALE
+    draft_rosters = db.scalars(
+        select(Roster).where(Roster.status.in_([RosterStatus.DRAFT, RosterStatus.VALIDATED]))
+    ).all()
+    for r in draft_rosters:
+        r.status = RosterStatus.STALE
+
     db.commit()
+
+    return {
+        "status": "SUCCESS",
+        "employee_id": str(employee_id),
+        "employee_name": emp_name,
+        "new_status": "INACTIVE",
+        "message": f"Employee '{emp_name}' deactivated successfully. Historical allocations and audit logs are preserved.",
+    }
 
 
 @router.get("/employees/{employee_id}/skills", response_model=list[SkillRead])
