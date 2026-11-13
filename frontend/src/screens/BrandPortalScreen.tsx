@@ -257,12 +257,45 @@ export const BrandPortalScreen: React.FC = () => {
 
       {/* Notifications / Alerts */}
       {error && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3 text-rose-300">
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
-          <div className="flex-1 text-sm">{error}</div>
-          <button onClick={() => setError(null)} className="text-rose-400 hover:text-rose-200">
-            <XCircle className="w-4 h-4" />
-          </button>
+        <div
+          className={`p-4 rounded-xl flex items-start justify-between gap-3 text-sm ${
+            error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')
+              ? 'bg-amber-500/10 border border-amber-500/30 text-amber-200'
+              : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+          }`}
+        >
+          <div className="flex items-start gap-3 flex-1">
+            {error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS') ? (
+              <FileSpreadsheet className="w-5 h-5 shrink-0 mt-0.5 text-amber-400" />
+            ) : (
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
+            )}
+            <div className="space-y-1">
+              <p className="font-semibold text-white">{error}</p>
+              {(error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')) && (
+                <p className="text-xs text-amber-300/90">
+                  Google Sheets export is unavailable because Google OAuth / Service Account is not configured on this server. Direct CSV export is fully operational.
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {(error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')) && (
+              <button
+                onClick={() => {
+                  setError(null);
+                  handleExportBrandSchedule();
+                }}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export CSV Instead</span>
+              </button>
+            )}
+            <button onClick={() => setError(null)} className="text-slate-400 hover:text-white p-1">
+              <XCircle className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 

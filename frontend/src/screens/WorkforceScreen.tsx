@@ -142,14 +142,26 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
     e.preventDefault();
     if (!selectedEmp) return;
     try {
-      await api.addEmployeeUnavailability(selectedEmp.id, {
-        date: leaveDate,
-        reason_type: leaveReason,
-        is_approved: true,
-        notes: leaveNotes,
-      });
-      const updated = await api.getEmployeeUnavailability(selectedEmp.id);
-      setEmpUnavailabilities(updated);
+      if (isPodLead) {
+        await api.submitEmployeeRequest({
+          employee_id: selectedEmp.id,
+          request_type: 'LEAVE',
+          reason_type: leaveReason,
+          start_date: leaveDate,
+          end_date: leaveDate,
+          notes: leaveNotes || `Leave request submitted by Pod Lead for ${selectedEmp.name}.`,
+        });
+        alert('Pod employee leave request submitted to Operations Manager for review.');
+      } else {
+        await api.addEmployeeUnavailability(selectedEmp.id, {
+          date: leaveDate,
+          reason_type: leaveReason,
+          is_approved: true,
+          notes: leaveNotes,
+        });
+        const updated = await api.getEmployeeUnavailability(selectedEmp.id);
+        setEmpUnavailabilities(updated);
+      }
       setLeaveNotes('');
     } catch (err: any) {
       alert(err.message || 'Failed to record absence');
@@ -603,10 +615,17 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
 
           {/* Record Approved Leave / Absence Form */}
           <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-200/80 text-xs">
-            <span className="font-bold text-slate-900 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
-              <CalendarOff className="w-3.5 h-3.5 text-amber-600" />
-              Record Approved Absence / Leave
-            </span>
+            <div>
+              <span className="font-bold text-slate-900 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                <CalendarOff className="w-3.5 h-3.5 text-amber-600" />
+                {isPodLead ? 'Submit Pod Member Leave Request' : 'Record Approved Absence / Leave'}
+              </span>
+              {isPodLead && (
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Leave requests are routed to Operations Managers for review and approval.
+                </p>
+              )}
+            </div>
 
             <form onSubmit={handleAddLeave} className="space-y-3 pt-1">
               <div className="grid grid-cols-2 gap-2">
@@ -641,16 +660,16 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
                   type="text"
                   value={leaveNotes}
                   onChange={(e) => setLeaveNotes(e.target.value)}
-                  placeholder="e.g. Hospitalization, doctor appointment"
+                  placeholder={isPodLead ? "Reason for leave (forwarded to manager)" : "e.g. Hospitalization, doctor appointment"}
                   className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs"
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs transition-colors"
               >
-                Record Approved Absence
+                {isPodLead ? 'Submit Leave Request to Operations Manager' : 'Record Approved Absence'}
               </button>
             </form>
           </div>
@@ -674,13 +693,15 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
                       <span className="ml-2 text-slate-600">{u.reason_type.replace('_', ' ')}</span>
                       {u.notes && <p className="text-[11px] text-slate-500">{u.notes}</p>}
                     </div>
-                    <button
-                      onClick={() => handleDeleteLeave(u.id)}
-                      className="text-rose-600 hover:text-rose-800 p-1"
-                      title="Remove absence"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!isPodLead && (
+                      <button
+                        onClick={() => handleDeleteLeave(u.id)}
+                        className="text-rose-600 hover:text-rose-800 p-1 cursor-pointer"
+                        title="Remove absence"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

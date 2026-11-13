@@ -18,6 +18,7 @@ import { RequestsCenterScreen } from './screens/RequestsCenterScreen';
 import { GenerateRosterModal } from './components/roster/GenerateRosterModal';
 import { NotificationBell } from './components/notifications/NotificationBell';
 import { useNotifications } from './hooks/useNotifications';
+import { RosterIQLogo } from './components/brand/RosterIQLogo';
 import { Activity } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -112,14 +113,10 @@ export const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
         <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
-              R
-            </div>
-            <div>
-              <h1 className="font-bold text-white text-base leading-tight">RosterIQ</h1>
-              <p className="text-[11px] text-slate-400">Brand Partner Self-Service Portal</p>
-            </div>
+          <div className="flex items-center gap-4">
+            <RosterIQLogo variant="full" size="md" showTagline={false} />
+            <div className="h-5 w-px bg-slate-800" />
+            <p className="text-xs text-slate-400 font-medium">Brand Partner Self-Service Portal</p>
           </div>
           <div className="flex items-center gap-4">
             <NotificationBell
@@ -135,7 +132,7 @@ export const App: React.FC = () => {
             </div>
             <button
               onClick={handleLogout}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-rose-400 border border-slate-700 transition-colors"
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-rose-400 border border-slate-700 transition-colors cursor-pointer"
             >
               Sign Out
             </button>
@@ -153,14 +150,10 @@ export const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
         <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
-              R
-            </div>
-            <div>
-              <h1 className="font-bold text-white text-base leading-tight">RosterIQ</h1>
-              <p className="text-[11px] text-slate-400">Employee Shift & Task Workspace</p>
-            </div>
+          <div className="flex items-center gap-4">
+            <RosterIQLogo variant="full" size="md" showTagline={false} />
+            <div className="h-5 w-px bg-slate-800" />
+            <p className="text-xs text-slate-400 font-medium">Employee Shift & Task Workspace</p>
           </div>
           <div className="flex items-center gap-4">
             <NotificationBell
@@ -228,13 +221,14 @@ export const App: React.FC = () => {
         />
       )}
 
-      {activeTab === 'requests' && (
+      {activeTab === 'requests' && (currentUser?.role === 'ADMIN' || currentUser?.role === 'OPERATIONS_MANAGER') && (
         <RequestsCenterScreen
           rosters={rosters}
           selectedRosterId={selectedRosterId}
           onRefreshRosters={loadRosters}
           onNavigateToConflicts={() => setActiveTab('conflicts')}
           onSelectRosterId={(id) => setSelectedRosterId(id)}
+          currentUser={currentUser}
         />
       )}
 

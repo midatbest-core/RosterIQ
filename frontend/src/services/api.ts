@@ -57,7 +57,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     let errorDetail = 'An error occurred';
     try {
       const errJson = await response.json();
-      errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson);
+      errorDetail =
+        errJson.error?.message ||
+        (typeof errJson.detail === 'string' ? errJson.detail : null) ||
+        errJson.message ||
+        errJson.error?.code ||
+        JSON.stringify(errJson);
     } catch {
       errorDetail = await response.text();
     }

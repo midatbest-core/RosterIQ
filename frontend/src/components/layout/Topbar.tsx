@@ -54,15 +54,25 @@ export const Topbar: React.FC<TopbarProps> = ({
       case 'dashboard':
         return { section: 'Overview', title: 'Operational Dashboard' };
       case 'analytics':
-        return { section: 'Overview', title: 'Workforce Capacity & Pod Analytics' };
+        return currentUser?.role === 'POD_LEAD'
+          ? { section: 'Pod Overview', title: 'Pod Capacity & Coverage Analytics' }
+          : { section: 'Overview', title: 'Workforce Capacity & Pod Analytics' };
+      case 'requests':
+        return { section: 'Scheduling', title: 'Requests & Approvals Centre' };
       case 'roster':
-        return { section: 'Scheduling', title: 'Roster Calendar Workspace' };
+        return currentUser?.role === 'POD_LEAD'
+          ? { section: 'Pod Schedule', title: 'Pod Calendar Workspace' }
+          : { section: 'Scheduling', title: 'Roster Calendar Workspace' };
       case 'conflicts':
-        return { section: 'Scheduling', title: 'Conflicts & Coverage Exceptions' };
+        return currentUser?.role === 'POD_LEAD'
+          ? { section: 'Pod Schedule', title: 'Pod Conflicts & Exceptions' }
+          : { section: 'Scheduling', title: 'Conflicts & Coverage Exceptions' };
       case 'allocation-log':
         return { section: 'Scheduling', title: 'Dynamic Allocation & Reassignment Log' };
       case 'employees':
-        return { section: 'Workforce', title: 'Employee Directory' };
+        return currentUser?.role === 'POD_LEAD'
+          ? { section: 'Pod Workforce', title: 'Pod Members Directory' }
+          : { section: 'Workforce', title: 'Employee Directory' };
       case 'pods':
         return { section: 'Workforce', title: 'Pods & Pod Leads' };
       case 'leaves':

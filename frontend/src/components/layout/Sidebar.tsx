@@ -18,6 +18,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import { User } from '../../services/types';
+import { RosterIQLogo } from '../brand/RosterIQLogo';
 
 export type NavTab =
   | 'dashboard'
@@ -80,7 +81,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           group: 'POD WORKFORCE',
           items: [
             { id: 'employees' as NavTab, label: 'Pod Members', icon: Users },
-            { id: 'requests' as NavTab, label: 'Pod Absence Requests', icon: FileText },
           ],
         },
       ]
@@ -139,21 +139,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     >
       {/* Brand Header */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800/80">
-        <div className="flex items-center gap-3 overflow-hidden">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-bold shadow-md shadow-indigo-900/30 shrink-0">
-            <Calendar className="w-5 h-5" />
-          </div>
-          {!isCollapsed && (
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-sm tracking-tight text-white">RosterIQ</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-sm bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  WFM
-                </span>
-              </div>
-              <span className="text-[11px] text-slate-400 font-medium">Enterprise Suite</span>
-            </div>
-          )}
+        <div className="flex items-center overflow-hidden">
+          <RosterIQLogo variant={isCollapsed ? 'icon' : 'full'} size="md" showTagline={false} />
         </div>
         <button
           onClick={onToggleCollapse}

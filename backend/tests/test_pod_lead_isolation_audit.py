@@ -451,6 +451,95 @@ def test_pod_lead_cannot_approve_absence(client: TestClient, audit_fixture: dict
     assert res.status_code == 403
 
 
+def test_pod_lead_cannot_reject_absence(client: TestClient, audit_fixture: dict):
+    login_as(client, "lead.alpha@rosteriq.io")
+    res = client.post(
+        f"/api/v1/employee-portal/requests/{uuid.uuid4()}/reject",
+        json={"manager_notes": "Lead trying to reject"},
+    )
+    assert res.status_code == 403
+
+
+def test_pod_lead_cannot_preview_impact(client: TestClient, audit_fixture: dict):
+    login_as(client, "lead.alpha@rosteriq.io")
+    res = client.post(
+        f"/api/v1/employee-portal/requests/{uuid.uuid4()}/preview-impact",
+    )
+    assert res.status_code == 403
+
+
+def test_ops_manager_and_admin_leave_approval_workflow(client: TestClient, audit_fixture: dict):
+    emp_a = audit_fixture["emp_a"]
+    # 1. Pod Lead submits request for own pod member
+    login_as(client, "lead.alpha@rosteriq.io")
+    sub_res = client.post(
+        "/api/v1/employee-portal/requests",
+        json={
+            "employee_id": str(emp_a.id),
+            "request_type": "LEAVE",
+            "reason_type": "PLANNED_LEAVE",
+            "start_date": "2026-11-20",
+            "end_date": "2026-11-20",
+            "notes": "Annual medical checkup submitted by Lead",
+        },
+    )
+    assert sub_res.status_code == 201
+    req_id = sub_res.json()["id"]
+
+    # 2. Pod Lead is forbidden from approving
+    res_lead_appr = client.post(
+        f"/api/v1/employee-portal/requests/{req_id}/approve",
+        json={"manager_notes": "Lead unauthorized approval"},
+    )
+    assert res_lead_appr.status_code == 403
+
+    # 3. Ops Manager approves successfully
+    login_as(client, "ops@rosteriq.io")
+    res_ops_appr = client.post(
+        f"/api/v1/employee-portal/requests/{req_id}/approve",
+        json={"manager_notes": "Approved by Ops Manager"},
+    )
+    assert res_ops_appr.status_code == 200
+    assert res_ops_appr.json()["status"] in ("APPROVED", "ROSTER_PENDING")
+
+    # 4. Create second request and verify System Admin can review and reject
+    login_as(client, "lead.alpha@rosteriq.io")
+    sub_res2 = client.post(
+        "/api/v1/employee-portal/requests",
+        json={
+            "employee_id": str(emp_a.id),
+            "request_type": "LEAVE",
+            "reason_type": "SICK_LEAVE",
+            "start_date": "2026-11-21",
+            "end_date": "2026-11-21",
+            "notes": "Second leave request",
+        },
+    )
+    assert sub_res2.status_code == 201
+    req2_id = sub_res2.json()["id"]
+
+    # 5. System Admin rejects with mandatory review notes
+    login_as(client, "admin@rosteriq.io")
+    res_admin_rej = client.post(
+        f"/api/v1/employee-portal/requests/{req2_id}/reject",
+        json={"manager_notes": "Staffing minimum threshold reached for this shift."},
+    )
+    assert res_admin_rej.status_code == 200
+    assert res_admin_rej.json()["status"] == "REJECTED"
+
+
+def test_unconfigured_google_sheets_does_not_break_csv_export(client: TestClient, audit_fixture: dict):
+    login_as(client, "ops@rosteriq.io")
+    r_id = audit_fixture["roster_draft"].id
+
+    # Verify CSV export succeeds with 200 and text/csv even without Google Sheets configuration
+    csv_resp = client.get(f"/api/v1/rosters/{r_id}/export/csv?view_type=company")
+    assert csv_resp.status_code == 200
+    assert "text/csv" in csv_resp.headers.get("content-type", "")
+    assert len(csv_resp.text) > 0
+
+
+
 # =====================================================================
 # Post-Audit Regression Fixes: Direct IDOR and Cross-Pod Defect Tests
 # =====================================================================

@@ -6,6 +6,7 @@ import {
   BrandImpactPreview,
   EmployeeImpactPreview,
   RosterSummary,
+  User as UserType,
 } from '../services/types';
 import {
   FileText,
@@ -33,6 +34,7 @@ interface RequestsCenterScreenProps {
   onRefreshRosters: () => Promise<void>;
   onNavigateToConflicts?: () => void;
   onSelectRosterId?: (id: string) => void;
+  currentUser?: UserType | null;
 }
 
 export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
@@ -41,6 +43,7 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
   onRefreshRosters,
   onNavigateToConflicts,
   onSelectRosterId,
+  currentUser,
 }) => {
   const [activeTab, setActiveTab] = useState<'brand' | 'employee'>('brand');
   const [brandRequests, setBrandRequests] = useState<BrandChangeRequest[]>([]);
@@ -289,6 +292,18 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
         );
     }
   };
+
+  if (currentUser && currentUser.role !== 'ADMIN' && currentUser.role !== 'OPERATIONS_MANAGER') {
+    return (
+      <div className="p-8 text-center bg-white rounded-xl border border-slate-200/80 shadow-2xs space-y-2">
+        <ShieldAlert className="w-8 h-8 text-rose-500 mx-auto" />
+        <h2 className="text-sm font-bold text-slate-800">Access Restricted</h2>
+        <p className="text-xs text-slate-500">
+          Leave request review and approval is restricted to System Administrators and Operations Managers only.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">

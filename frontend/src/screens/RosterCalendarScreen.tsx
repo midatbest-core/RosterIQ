@@ -23,6 +23,8 @@ import {
   ChevronRight,
   Filter,
   Search,
+  Download,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface RosterCalendarScreenProps {
@@ -252,17 +254,48 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
       />
 
       {error && (
-        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{error}</span>
+        <div
+          className={`p-3.5 text-xs rounded-xl flex items-center justify-between gap-3 ${
+            error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')
+              ? 'bg-amber-50 border border-amber-200 text-amber-900'
+              : 'bg-rose-50 border border-rose-200 text-rose-700'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 flex-1">
+            {error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS') ? (
+              <FileSpreadsheet className="w-4 h-4 text-amber-600 shrink-0" />
+            ) : (
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <div className="space-y-0.5">
+              <span className="font-semibold">{error}</span>
+              {(error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')) && (
+                <p className="text-[11px] text-amber-700">
+                  Google Sheets export is unavailable (Google OAuth is not configured on the server). Direct CSV export is ready to download.
+                </p>
+              )}
+            </div>
           </div>
-          <button
-            onClick={() => setError(null)}
-            className="text-xs font-semibold text-rose-800 hover:underline"
-          >
-            Dismiss
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {(error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')) && (
+              <button
+                onClick={() => {
+                  setError(null);
+                  handleExportCsv();
+                }}
+                className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export CSV Instead</span>
+              </button>
+            )}
+            <button
+              onClick={() => setError(null)}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-1 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 

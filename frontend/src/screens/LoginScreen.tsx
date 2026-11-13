@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { User, DemoRole } from '../services/types';
+import { RosterIQLogo } from '../components/brand/RosterIQLogo';
 import {
-  Calendar,
   Lock,
   Mail,
   ArrowRight,
@@ -36,7 +36,7 @@ const DEFAULT_DEMO_ROLES: DemoRole[] = [
   {
     role: 'POD_LEAD',
     name: 'Pod Lead',
-    description: 'Pod Alpha team scheduling, unavailability logging & approvals',
+    description: 'Pod Alpha team scheduling, workforce allocation & leave submissions',
     email: 'lead.staging@rosteriq.io',
   },
   {
@@ -133,16 +133,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden my-6">
         {/* Header Branding */}
-        <div className="p-8 pb-6 text-center space-y-3 bg-gradient-to-b from-indigo-50/50 to-white dark:from-slate-800/40 dark:to-slate-900">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/30">
-            <Calendar className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">RosterIQ</h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Workforce Operations & Deterministic Scheduling Suite
-            </p>
-          </div>
+        <div className="p-8 pb-6 text-center flex flex-col items-center space-y-3 bg-gradient-to-b from-indigo-50/50 to-white dark:from-slate-800/40 dark:to-slate-900">
+          <RosterIQLogo variant="full" size="xl" showTagline={true} />
         </div>
 
         {/* Form Body */}

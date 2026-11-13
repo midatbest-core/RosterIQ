@@ -412,7 +412,7 @@ def preview_employee_request_impact(
     request_id: UUID,
     roster_id: UUID | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(require_lead_or_manager),
+    user: User = Depends(require_manager),
 ) -> EmployeeImpactPreview:
     """Analyzes the exact impact of an employee absence request on active roster allocations."""
     req = db.get(EmployeeAvailabilityRequest, request_id)

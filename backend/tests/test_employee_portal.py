@@ -240,7 +240,12 @@ def test_employee_portal_scoping_and_workflow(client: TestClient, db_session: Se
     resp = client.get(f"/api/v1/employee-portal/requests/{req_id}")
     assert resp.status_code == 200
 
-    # Pod Lead A previews impact for Alice (200 OK)
+    # Pod Lead A cannot preview impact for review (403 Forbidden - review/approval reserved for Ops Manager/Admin)
+    resp = client.post(f"/api/v1/employee-portal/requests/{req_id}/preview-impact", headers=csrf_headers(client))
+    assert resp.status_code == 403
+
+    # Operations Manager logs in and previews impact for Alice (200 OK)
+    client.post("/api/v1/auth/login", json={"email": u_mgr.email, "password": "Pass1234!"})
     resp = client.post(f"/api/v1/employee-portal/requests/{req_id}/preview-impact", headers=csrf_headers(client))
     assert resp.status_code == 200
     preview = resp.json()
