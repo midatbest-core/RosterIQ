@@ -513,6 +513,13 @@ export interface PresentationDemoAccount {
   description: string;
 }
 
+export interface DemoRole {
+  role: 'ADMIN' | 'OPERATIONS_MANAGER' | 'POD_LEAD' | 'BRAND_USER' | 'EMPLOYEE';
+  name: string;
+  description: string;
+  email: string;
+}
+
 
 
 

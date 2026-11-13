@@ -30,3 +30,14 @@ class LoginResponse(BaseModel):
     user: UserRead
     csrf_token: str
 
+
+class DemoLoginRequest(BaseModel):
+    role: str = Field(..., description="Role to authenticate as: ADMIN, OPERATIONS_MANAGER, POD_LEAD, BRAND_USER, EMPLOYEE")
+
+
+class DemoRoleRead(BaseModel):
+    role: str
+    name: str
+    description: str
+    email: str
+

@@ -14,8 +14,14 @@ from app.core.errors import AppError
 from app.core.security import create_access_token, new_csrf_token, verify_password
 from app.db.session import get_db
 from app.modules.auth.dependencies import get_current_user, verify_csrf
-from app.modules.auth.models import User
-from app.modules.auth.schemas import LoginRequest, LoginResponse, UserRead
+from app.modules.auth.models import User, UserRole
+from app.modules.auth.schemas import (
+    DemoLoginRequest,
+    DemoRoleRead,
+    LoginRequest,
+    LoginResponse,
+    UserRead,
+)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -382,6 +388,169 @@ def get_presentation_demo_accounts() -> list[dict[str, str]]:
     account_map = {a.get("role"): a for a in accounts}
     sorted_accounts = [account_map[r] for r in order if r in account_map]
     return sorted_accounts if sorted_accounts else accounts
+
+
+@router.get("/demo-roles", response_model=list[DemoRoleRead])
+def get_demo_roles(db: Session = Depends(get_db)) -> list[DemoRoleRead]:
+    """
+    Returns predefined staging demo roles for 1-click presentation login.
+    Strictly disabled when environment is production.
+    No passwords are ever exposed.
+    """
+    settings = get_settings()
+    if settings.environment.lower() == "production":
+        raise AppError(
+            code="FORBIDDEN",
+            message="Demo roles are strictly disabled in production.",
+            status_code=403,
+        )
+
+    if not settings.enable_demo_credentials:
+        raise AppError(
+            code="FORBIDDEN",
+            message="Demo access is disabled.",
+            status_code=403,
+        )
+
+    roles_metadata = [
+        {
+            "role": "ADMIN",
+            "name": "System Admin",
+            "description": "Full company-wide visibility, system configuration & audits",
+            "default_email": "admin.staging@rosteriq.io",
+        },
+        {
+            "role": "OPERATIONS_MANAGER",
+            "name": "Operations Manager",
+            "description": "Roster generation, constraint rules & requests review center",
+            "default_email": "ops.staging@rosteriq.io",
+        },
+        {
+            "role": "POD_LEAD",
+            "name": "Pod Lead",
+            "description": "Pod Alpha team scheduling, unavailability logging & approvals",
+            "default_email": "lead.staging@rosteriq.io",
+        },
+        {
+            "role": "BRAND_USER",
+            "name": "Brand User",
+            "description": "Kavya Organic Skincare portal, operating calendar & change requests",
+            "default_email": "brand.staging@rosteriq.io",
+        },
+        {
+            "role": "EMPLOYEE",
+            "name": "Employee",
+            "description": "Aarav Sharma (EMP-001) personal schedule, shifts & leave requests",
+            "default_email": "employee.staging@rosteriq.io",
+        },
+    ]
+
+    results: list[DemoRoleRead] = []
+    for r in roles_metadata:
+        role_enum = UserRole(r["role"])
+        user = db.scalar(select(User).where(User.email == r["default_email"], User.is_active == True))
+        if not user:
+            user = db.scalar(select(User).where(User.role == role_enum, User.is_active == True))
+        email_display = user.email if user else r["default_email"]
+        results.append(
+            DemoRoleRead(
+                role=r["role"],
+                name=r["name"],
+                description=r["description"],
+                email=email_display,
+            )
+        )
+
+    return results
+
+
+@router.post("/demo-login", response_model=LoginResponse)
+def demo_login(
+    payload: DemoLoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> LoginResponse:
+    """
+    1-Click direct authentication for presentation demo roles.
+    Authenticates the client directly into the real database account with appropriate
+    permissions and tenant scope, setting secure authentication cookies.
+    Strictly disabled in production.
+    """
+    settings = get_settings()
+    if settings.environment.lower() == "production":
+        raise AppError(
+            code="FORBIDDEN",
+            message="Demo login is strictly disabled in production.",
+            status_code=403,
+        )
+
+    if not settings.enable_demo_credentials:
+        raise AppError(
+            code="FORBIDDEN",
+            message="Demo login is disabled.",
+            status_code=403,
+        )
+
+    role_str = payload.role.strip().upper()
+    try:
+        role_enum = UserRole(role_str)
+    except ValueError:
+        raise AppError(
+            code="INVALID_ROLE",
+            message=f"Invalid demo role: {payload.role}",
+            status_code=400,
+        )
+
+    staging_email_map = {
+        UserRole.ADMIN: "admin.staging@rosteriq.io",
+        UserRole.OPERATIONS_MANAGER: "ops.staging@rosteriq.io",
+        UserRole.POD_LEAD: "lead.staging@rosteriq.io",
+        UserRole.BRAND_USER: "brand.staging@rosteriq.io",
+        UserRole.EMPLOYEE: "employee.staging@rosteriq.io",
+    }
+
+    target_email = staging_email_map.get(role_enum)
+    user = None
+    if target_email:
+        user = db.scalar(select(User).where(User.email == target_email, User.is_active == True))
+
+    if user is None:
+        user = db.scalar(select(User).where(User.role == role_enum, User.is_active == True))
+
+    if user is None:
+        raise AppError(
+            code="NOT_FOUND",
+            message=f"No active account found for role {role_str}",
+            status_code=404,
+        )
+
+    user.last_login_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(user)
+
+    access_token = create_access_token(user.id, user.role.value)
+    csrf_token = new_csrf_token()
+    samesite_val = settings.effective_cookie_samesite
+
+    response.set_cookie(
+        "access_token",
+        access_token,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=samesite_val,
+        max_age=settings.access_token_minutes * 60,
+        path="/",
+    )
+    response.set_cookie(
+        "csrf_token",
+        csrf_token,
+        httponly=False,
+        secure=settings.cookie_secure,
+        samesite=samesite_val,
+        max_age=settings.access_token_minutes * 60,
+        path="/",
+    )
+    return LoginResponse(user=UserRead.model_validate(user), csrf_token=csrf_token)
 
 
 

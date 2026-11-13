@@ -18,6 +18,7 @@ import {
   ResolverApplyResponse,
   AppNotification,
   PresentationDemoAccount,
+  DemoRole,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -76,6 +77,20 @@ export const api = {
     const res = await request<{ user: User; csrf_token: string } | User>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+    });
+    if (typeof res === 'object' && res !== null && 'csrf_token' in res && (res as any).csrf_token) {
+      inMemoryCsrfToken = (res as any).csrf_token;
+      try {
+        sessionStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
+      } catch {}
+    }
+    return (res as any).user ? (res as any).user : (res as User);
+  },
+  getDemoRoles: () => request<DemoRole[]>('/auth/demo-roles'),
+  demoLogin: async (role: string): Promise<User> => {
+    const res = await request<{ user: User; csrf_token: string } | User>('/auth/demo-login', {
+      method: 'POST',
+      body: JSON.stringify({ role }),
     });
     if (typeof res === 'object' && res !== null && 'csrf_token' in res && (res as any).csrf_token) {
       inMemoryCsrfToken = (res as any).csrf_token;

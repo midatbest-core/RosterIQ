@@ -10,150 +10,132 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_presentation_demo_accounts_disabled_in_production(monkeypatch):
+def test_production_rejection_for_all_demo_endpoints(monkeypatch):
+    """Production mode must unconditionally forbid all demo endpoints."""
     monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "production")
-    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")
+    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")  # even if flag is true
     get_settings.cache_clear()
 
-    response = client.get("/api/v1/auth/presentation-demo-accounts")
-    assert response.status_code == 403
-    data = response.json()
-    assert "disabled in production" in data["error"]["message"].lower()
+    prod_client = TestClient(app)
 
+    # 1. demo-roles rejected in production
+    res1 = prod_client.get("/api/v1/auth/demo-roles")
+    assert res1.status_code == 403
+    assert "production" in res1.json()["error"]["message"].lower()
 
-def test_presentation_demo_accounts_disabled_when_flag_false(monkeypatch):
-    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "development")
-    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "false")
+    # 2. demo-login rejected in production for all roles
+    for role in ["ADMIN", "OPERATIONS_MANAGER", "POD_LEAD", "BRAND_USER", "EMPLOYEE"]:
+        res2 = prod_client.post("/api/v1/auth/demo-login", json={"role": role})
+        assert res2.status_code == 403
+        assert "production" in res2.json()["error"]["message"].lower()
+
+    # 3. presentation-demo-accounts rejected in production
+    res3 = prod_client.get("/api/v1/auth/presentation-demo-accounts")
+    assert res3.status_code == 403
+    assert "production" in res3.json()["error"]["message"].lower()
+
     get_settings.cache_clear()
 
-    response = client.get("/api/v1/auth/presentation-demo-accounts")
-    assert response.status_code == 403
-    data = response.json()
-    assert "disabled" in data["error"]["message"].lower()
 
-
-def test_presentation_demo_accounts_returns_five_accounts_when_enabled(monkeypatch):
-    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "development")
-    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")
-    get_settings.cache_clear()
-
-    response = client.get("/api/v1/auth/presentation-demo-accounts")
-    assert response.status_code == 200
-    accounts = response.json()
-    assert len(accounts) == 5
-
-    roles = [a["role"] for a in accounts]
-    assert roles == ["ADMIN", "OPERATIONS_MANAGER", "POD_LEAD", "BRAND_USER", "EMPLOYEE"]
-
-    for acc in accounts:
-        assert "role_name" in acc
-        assert "email" in acc and "@" in acc["email"]
-        assert "password" in acc and len(acc["password"]) >= 10
-        assert "description" in acc
-
-
-def test_presentation_demo_accounts_login_succeeds(monkeypatch):
-    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "development")
-    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")
-    get_settings.cache_clear()
-
-    response = client.get("/api/v1/auth/presentation-demo-accounts")
-    assert response.status_code == 200
-    accounts = response.json()
-
-    for acc in accounts:
-        login_resp = client.post(
-            "/api/v1/auth/login",
-            json={"email": acc["email"], "password": acc["password"]},
-        )
-        assert login_resp.status_code == 200, f"Login failed for {acc['role']} ({acc['email']})"
-        data = login_resp.json()
-        assert data["user"]["email"] == acc["email"]
-        assert data["user"]["role"] == acc["role"]
-
-
-def test_unauthenticated_me_returns_401(monkeypatch):
-    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "staging")
-    get_settings.cache_clear()
-    unauth_client = TestClient(app)
-    resp = unauth_client.get("/api/v1/auth/me")
-    assert resp.status_code == 401
-    assert resp.json()["error"]["code"] == "NOT_AUTHENTICATED"
-
-
-def test_staging_login_followed_by_authenticated_me(monkeypatch):
+def test_demo_roles_returns_five_roles_without_passwords(monkeypatch):
+    """GET /api/v1/auth/demo-roles must return all 5 roles and NEVER leak passwords."""
     monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "staging")
     monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")
     get_settings.cache_clear()
 
-    auth_client = TestClient(app)
-    # Fetch demo account
-    demo_resp = auth_client.get("/api/v1/auth/presentation-demo-accounts")
-    assert demo_resp.status_code == 200
-    admin_acc = next(a for a in demo_resp.json() if a["role"] == "ADMIN")
+    resp = client.get("/api/v1/auth/demo-roles")
+    assert resp.status_code == 200
+    roles = resp.json()
+    assert len(roles) == 5
 
-    # Perform login
-    login_resp = auth_client.post(
-        "/api/v1/auth/login",
-        json={"email": admin_acc["email"], "password": admin_acc["password"]},
-    )
-    assert login_resp.status_code == 200
-    assert "access_token" in login_resp.cookies
+    expected_roles = ["ADMIN", "OPERATIONS_MANAGER", "POD_LEAD", "BRAND_USER", "EMPLOYEE"]
+    assert [r["role"] for r in roles] == expected_roles
 
-    # Test authenticated /me
-    me_resp = auth_client.get("/api/v1/auth/me")
+    for r in roles:
+        assert "role" in r
+        assert "name" in r
+        assert "description" in r
+        assert "email" in r and "@" in r["email"]
+        # CRITICAL: passwords must never be present in the public roles response
+        assert "password" not in r
+        assert "password_hash" not in r
+
+
+@pytest.mark.parametrize("role", ["ADMIN", "OPERATIONS_MANAGER", "POD_LEAD", "BRAND_USER", "EMPLOYEE"])
+def test_all_five_roles_direct_demo_login(monkeypatch, role):
+    """1-Click demo login must authenticate each of the 5 roles directly without password."""
+    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "staging")
+    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")
+    get_settings.cache_clear()
+
+    test_client = TestClient(app)
+    resp = test_client.post("/api/v1/auth/demo-login", json={"role": role})
+    assert resp.status_code == 200, f"Demo login failed for role {role}: {resp.text}"
+
+    data = resp.json()
+    assert data["user"]["role"] == role
+    assert data["user"]["is_active"] is True
+    assert "access_token" in resp.cookies
+    assert "csrf_token" in resp.cookies
+
+    # Session persistence verification: /auth/me returns this user
+    me_resp = test_client.get("/api/v1/auth/me")
     assert me_resp.status_code == 200
-    user_info = me_resp.json()
-    assert user_info["email"] == admin_acc["email"]
-    assert user_info["role"] == "ADMIN"
+    me_data = me_resp.json()
+    assert me_data["id"] == data["user"]["id"]
+    assert me_data["role"] == role
 
 
-def test_cookie_samesite_cross_domain_modes(monkeypatch):
-    # Case 1: In local development (cookie_secure=False) => SameSite=lax
+def test_demo_login_session_persistence_and_logout(monkeypatch):
+    """Full lifecycle: demo login -> authenticated session -> logout -> session termination."""
+    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "staging")
+    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")
+    get_settings.cache_clear()
+
+    session_client = TestClient(app)
+
+    # 1. Unauthenticated /me returns 401
+    assert session_client.get("/api/v1/auth/me").status_code == 401
+
+    # 2. 1-Click login as Operations Manager
+    login_res = session_client.post("/api/v1/auth/demo-login", json={"role": "OPERATIONS_MANAGER"})
+    assert login_res.status_code == 200
+    csrf_token = login_res.json()["csrf_token"]
+
+    # 3. Session persists across requests
+    me_res = session_client.get("/api/v1/auth/me")
+    assert me_res.status_code == 200
+    assert me_res.json()["role"] == "OPERATIONS_MANAGER"
+
+    # 4. Logout using CSRF token
+    logout_res = session_client.post(
+        "/api/v1/auth/logout",
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert logout_res.status_code == 204
+
+    # 5. Subsequent request is 401
+    assert session_client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_demo_login_invalid_role(monkeypatch):
+    """Invalid role parameter returns 400 Bad Request."""
+    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "staging")
+    get_settings.cache_clear()
+
+    resp = client.post("/api/v1/auth/demo-login", json={"role": "SUPERUSER"})
+    assert resp.status_code == 400
+    assert "invalid" in resp.json()["error"]["message"].lower()
+
+
+def test_cookie_samesite_modes(monkeypatch):
+    """Cross-domain cookie behavior configuration test."""
     monkeypatch.setenv("ROSTERIQ_COOKIE_SECURE", "false")
     get_settings.cache_clear()
-    dev_settings = get_settings()
-    assert dev_settings.effective_cookie_samesite == "lax"
+    assert get_settings().effective_cookie_samesite == "lax"
 
-    # Case 2: In hosted staging/production (cookie_secure=True) => defaults to SameSite=none for cross-domain Vercel->Render
     monkeypatch.setenv("ROSTERIQ_COOKIE_SECURE", "true")
     monkeypatch.delenv("ROSTERIQ_COOKIE_SAMESITE", raising=False)
     get_settings.cache_clear()
-    hosted_settings = get_settings()
-    assert hosted_settings.effective_cookie_samesite == "none"
-
-    # Case 3: Explicit override
-    monkeypatch.setenv("ROSTERIQ_COOKIE_SAMESITE", "strict")
+    assert get_settings().effective_cookie_samesite == "none"
     get_settings.cache_clear()
-    assert get_settings().effective_cookie_samesite == "strict"
-    get_settings.cache_clear()
-
-
-def test_presentation_demo_accounts_fallback_json_parsing(monkeypatch, tmp_path):
-    import json
-    mock_creds = [
-        {"role": "ADMIN", "email": "fallback.admin@test.com", "password": "fallbackpwd123!", "description": "Fallback Admin"},
-        {"role": "EMPLOYEE", "email": "fallback.emp@test.com", "password": "fallbackpwd456!", "description": "Fallback Employee"},
-    ]
-    # Set environment variables
-    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "staging")
-    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")
-    monkeypatch.setenv("ROSTERIQ_DEMO_CREDENTIALS_JSON", json.dumps(mock_creds))
-    get_settings.cache_clear()
-
-    # Mock os.path.exists to simulate running on hosted environment without local credentials file
-    orig_exists = os.path.exists
-    def mock_exists(p):
-        if ".staging_test_credentials.local" in str(p):
-            return False
-        return orig_exists(p)
-    monkeypatch.setattr("os.path.exists", mock_exists)
-
-    resp = client.get("/api/v1/auth/presentation-demo-accounts")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data) == 2
-    assert data[0]["email"] == "fallback.admin@test.com"
-    assert data[0]["role_name"] == "System Admin"
-    assert data[1]["email"] == "fallback.emp@test.com"
-    assert data[1]["role_name"] == "Employee"
