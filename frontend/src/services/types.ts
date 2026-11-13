@@ -108,6 +108,8 @@ export interface EmployeeTaskItem {
   process_code: string;
   allocation_type: string;
   status: string;
+  employee_id?: string;
+  employee_name?: string;
 }
 
 export interface EmployeeAvailabilityRequest {
@@ -490,6 +492,19 @@ export interface ResolverApplyResponse {
   validation_conflicts_count: number;
   applied_at: string;
 }
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  notification_type: string;
+  reference_type?: string | null;
+  reference_id?: string | null;
+  is_read: boolean;
+  created_at?: string;
+  request_status?: string | null;
+}
+
 
 
 

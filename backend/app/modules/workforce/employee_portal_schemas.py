@@ -36,9 +36,12 @@ class EmployeeTaskItem(BaseModel):
     process_code: str
     allocation_type: str
     status: str = "SCHEDULED"
+    employee_id: UUID | None = None
+    employee_name: str | None = None
 
 
 class EmployeeAvailabilityRequestCreate(BaseModel):
+    employee_id: UUID | None = Field(default=None, description="Employee ID (allowed for Pod Lead submitting for pod member)")
     request_type: str = Field(description="LEAVE, SICK_LEAVE, WEEKLY_OFF, COMP_OFF, or PREFERENCE")
     start_date: str = Field(description="YYYY-MM-DD")
     end_date: str = Field(description="YYYY-MM-DD")

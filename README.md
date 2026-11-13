@@ -278,3 +278,89 @@ Roster/
 - [x] **29/29 Pytest Tests Passing**.
 - [x] **9/9 Runtime Verification Workflows Passing**.
 - [x] **Frontend Builds Cleanly in Production Mode**.
+
+---
+
+## 8. Export Capabilities: CSV and Google Sheets Integration
+
+RosterIQ provides dual export channels for operational rosters: **Direct Downloadable CSV** and **Direct-to-Google Sheets Export**, maintaining 100% data parity and strict role-based access control across all 5 operational views.
+
+### A. Direct Downloadable CSV
+- **Immediate Download**: Generates RFC 4180-compliant CSV files with UTF-8 BOM (`utf-8-sig`) for native Microsoft Excel and Google Sheets character fidelity.
+- **Unified 14-Column Format**:
+  `Date, Day of Week, Pod, Employee Code, Employee Name, Brand, Process, Shift Start, Shift End, Allocation Start, Allocation End, Allocation Status, Cross-Pod Approved, Reassigned From`
+- **Supported Views**:
+  - `company`: Complete workforce shift & allocation matrix.
+  - `pod`: Filtered by specific pod (or locked to Pod Lead's assigned pod).
+  - `brand`: Filtered by brand portfolio (or locked to Brand User's assigned brand).
+  - `process`: Filtered by operational process (Customer Support, Retention, NDR).
+  - `employee`: Personal shift and task checklist for individual personnel.
+- **Strict Tenant & Role Scoping**:
+  - `ADMIN` & `OPERATIONS_MANAGER`: Full export across all views and entities.
+  - `POD_LEAD`: Restricted strictly to authorized pod; foreign pod or cross-entity exports return `403 Forbidden`.
+  - `BRAND_USER`: Restricted strictly to assigned brand; foreign brand exports return `403 Forbidden`.
+  - `EMPLOYEE`: Restricted strictly to personal schedule; foreign record exports return `403 Forbidden`.
+- **Zero Credentials/PII**: Password hashes, tokens, secret keys, and personal contact details are strictly excluded.
+
+### B. Direct Google Sheets Export
+- **Cloud-Native Automation**: Automatically creates a new Google Spreadsheet via the official Google Sheets API v4 (`spreadsheets.create`).
+- **Professional Formatting**: Applies styled header rows (dark slate background `#1E293B`, bold white text `#FFFFFF`, center-aligned), freezes the header row, auto-resizes column dimensions, and populates data via `spreadsheets.values.update`.
+- **Returned Deliverable**: Returns `spreadsheet_id` and the direct browser URL (`https://docs.google.com/spreadsheets/d/{id}/edit`), automatically opening the new sheet in a new tab.
+- **Decoupled & Resilient**: Google Sheets integration is completely decoupled from core scheduling. If Google credentials are not configured on the server, the application degrades gracefully: the UI informs the user, and direct CSV download remains immediately accessible.
+
+### C. Google Cloud Project & OAuth 2.0 Setup Guide
+
+To enable live Google Sheets exports in your deployment:
+
+#### 1. Create Google Cloud Project
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Click **Select a project** $\to$ **New Project**.
+3. Name the project (e.g., `RosterIQ-Workforce`) and click **Create**.
+
+#### 2. Enable Required APIs
+1. In the Google Cloud Console, navigate to **APIs & Services** $\to$ **Library**.
+2. Search for and enable:
+   - **Google Sheets API**
+   - **Google Drive API** (used for file creation and permissions)
+
+#### 3. Configure OAuth Consent Screen
+1. Navigate to **APIs & Services** $\to$ **OAuth consent screen**.
+2. Choose **Internal** (if Google Workspace organization) or **External** (for development/testing).
+3. Fill in the App Name (`RosterIQ`), User support email, and Developer contact information.
+4. Under **Scopes**, click **Add or Remove Scopes** and select:
+   - `https://www.googleapis.com/auth/spreadsheets`
+   - `https://www.googleapis.com/auth/drive.file`
+5. If **External**, add your test Google account emails under **Test users**. Save and continue.
+
+#### 4. Create OAuth 2.0 Client Credentials
+1. Navigate to **APIs & Services** $\to$ **Credentials** $\to$ **Create Credentials** $\to$ **OAuth client ID**.
+2. Select Application type: **Web application**.
+3. Add **Authorized redirect URIs**:
+   - `http://localhost:5173/oauth/google/callback` (local frontend dev)
+   - `http://localhost:8000/api/v1/auth/google/callback` (backend API callback)
+4. Click **Create** and securely copy the **Client ID** and **Client Secret**.
+
+#### 5. Alternative: Server-to-Server Service Account Setup
+For automated headless enterprise exports without interactive user login:
+1. In **Credentials**, click **Create Credentials** $\to$ **Service account**.
+2. Name the service account (e.g., `rosteriq-sheet-exporter`) and click **Done**.
+3. Click the created service account $\to$ **Keys** tab $\to$ **Add Key** $\to$ **Create new key** $\to$ **JSON**.
+4. Download the generated JSON key file to a secure directory (never commit this file).
+
+#### 6. Configure Environment Variables
+Set the following environment variables in `backend/.env` or your hosting runtime:
+
+```bash
+# Option A: User OAuth 2.0 Flow
+ROSTERIQ_GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+ROSTERIQ_GOOGLE_CLIENT_SECRET="your-client-secret"
+ROSTERIQ_GOOGLE_REDIRECT_URI="http://localhost:5173/oauth/google/callback"
+
+# Option B: Server Service Account (JSON file path or string)
+ROSTERIQ_GOOGLE_SERVICE_ACCOUNT_FILE="/path/to/service-account.json"
+# Or inline JSON string:
+# ROSTERIQ_GOOGLE_SERVICE_ACCOUNT_INFO='{"type": "service_account", ...}'
+```
+
+*Note: If no Google credentials are set, `GET /api/v1/rosters/export/google-sheets/status` cleanly reports `enabled: false`, the UI alerts the user gracefully, and direct CSV export remains 100% functional.*
+

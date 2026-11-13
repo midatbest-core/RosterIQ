@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -63,6 +64,20 @@ def me(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def _get_reference_status(db: Session, ref_type: str | None, ref_id: uuid.UUID | None) -> str | None:
+    if not ref_type or not ref_id:
+        return None
+    if ref_type == "employee_availability_request":
+        from app.modules.workforce.request_models import EmployeeAvailabilityRequest
+        req = db.get(EmployeeAvailabilityRequest, ref_id)
+        return req.status if req else None
+    elif ref_type == "brand_change_request":
+        from app.modules.operations.request_models import BrandChangeRequest
+        req = db.get(BrandChangeRequest, ref_id)
+        return req.status if req else None
+    return None
+
+
 @router.get("/notifications")
 def list_notifications(
     db: Session = Depends(get_db),
@@ -86,6 +101,7 @@ def list_notifications(
             "reference_id": str(n.reference_id) if n.reference_id else None,
             "is_read": n.is_read,
             "created_at": n.created_at.isoformat() if n.created_at else None,
+            "request_status": _get_reference_status(db, n.reference_type, n.reference_id),
         }
         for n in notifs
     ]
@@ -106,6 +122,69 @@ def mark_notification_read(
     notif.is_read = True
     db.commit()
     return {"status": "ok"}
+
+
+@router.delete("/notifications/{notification_id}")
+def delete_notification(
+    notification_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Deletes a user's notification. Fails with 404/403 if it does not belong to the user."""
+    from app.modules.auth.notification_models import Notification
+    import uuid
+    notif = db.get(Notification, uuid.UUID(notification_id))
+    if not notif or notif.user_id != user.id:
+        raise AppError("NOT_FOUND", "Notification not found.", 404)
+    db.delete(notif)
+    db.commit()
+    return {"status": "deleted", "id": notification_id}
+
+
+@router.get("/notifications/stream")
+async def stream_notifications(
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """
+    Server-Sent Events (SSE) endpoint delivering real-time notifications to the authenticated user.
+    Maintains periodic heartbeats and isolates notifications per user.
+    """
+    import asyncio
+    import json
+    from app.modules.auth.broadcaster import broadcaster
+
+    queue = await broadcaster.subscribe(user.id)
+
+    async def event_generator():
+        try:
+            # Send initial connected handshake event
+            yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'user_id': str(user.id)})}\n\n"
+            while True:
+                # Check for client disconnect
+                if await request.is_disconnected():
+                    break
+                try:
+                    # Wait up to 15 seconds for new notification, otherwise emit heartbeat
+                    payload = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"event: notification\ndata: {json.dumps(payload)}\n\n"
+                except asyncio.TimeoutError:
+                    if await request.is_disconnected():
+                        break
+                    yield f"event: ping\ndata: {json.dumps({'time': datetime.now(UTC).isoformat()})}\n\n"
+        finally:
+            await broadcaster.unsubscribe(user.id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 
 @router.get("/demo-accounts")

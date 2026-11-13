@@ -7,6 +7,7 @@ import {
   DayCell,
   AllocationCell,
   RosterConflict,
+  User,
 } from '../services/types';
 import { CalendarToolbar, RosterViewMode, TimeScope } from '../components/roster/CalendarToolbar';
 import { AllocationCard } from '../components/roster/AllocationCard';
@@ -30,6 +31,8 @@ interface RosterCalendarScreenProps {
   onRefreshRosters: () => void;
   onOpenGenerateModal: () => void;
   searchQuery?: string;
+  onNavigateToConflicts?: () => void;
+  currentUser?: User | null;
 }
 
 export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
@@ -38,14 +41,19 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
   onRefreshRosters,
   onOpenGenerateModal,
   searchQuery = '',
+  onNavigateToConflicts,
+  currentUser,
 }) => {
-  const [viewMode, setViewMode] = useState<RosterViewMode>('company');
+  const isPodLead = currentUser?.role === 'POD_LEAD';
+  const [viewMode, setViewMode] = useState<RosterViewMode>(isPodLead ? 'pod' : 'company');
   const [timeScope, setTimeScope] = useState<TimeScope>('month');
   const [gridData, setGridData] = useState<RosterGridView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filterId, setFilterId] = useState<string>('');
+  const [filterId, setFilterId] = useState<string>(isPodLead && currentUser?.pod_id ? currentUser.pod_id : '');
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isExportingGoogle, setIsExportingGoogle] = useState(false);
 
   // Detail Drawer state
   const [selectedAllocation, setSelectedAllocation] = useState<AllocationCell | null>(null);
@@ -113,6 +121,35 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
       setError(err.message || 'Failed to create child version');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    if (!currentRoster) return;
+    try {
+      setIsExporting(true);
+      setError(null);
+      await api.exportRosterCsv(currentRoster.id, viewMode, filterId || undefined);
+    } catch (err: any) {
+      setError(err.message || 'Failed to export CSV');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportGoogleSheets = async () => {
+    if (!currentRoster) return;
+    try {
+      setIsExportingGoogle(true);
+      setError(null);
+      const res = await api.exportRosterGoogleSheets(currentRoster.id, viewMode, filterId || undefined);
+      if (res && res.spreadsheet_url) {
+        window.open(res.spreadsheet_url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Google Sheets export failed. Direct CSV export is available.');
+    } finally {
+      setIsExportingGoogle(false);
     }
   };
 
@@ -200,12 +237,18 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
         currentRoster={currentRoster}
         onPublish={handlePublish}
         onCreateChildVersion={handleCreateChildVersion}
+        onExportCsv={handleExportCsv}
+        isExporting={isExporting}
+        onExportGoogleSheets={handleExportGoogleSheets}
+        isExportingGoogle={isExportingGoogle}
         onOpenGenerateModal={onOpenGenerateModal}
         filterId={filterId}
         onFilterChange={setFilterId}
         filterOptions={filterOptions}
         filterLabel={filterLabel}
         isPublishing={isPublishing}
+        onOpenConflicts={onNavigateToConflicts}
+        currentUser={currentUser}
       />
 
       {error && (

@@ -20,8 +20,8 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
-  const [email, setEmail] = useState('admin@example.com');
-  const [password, setPassword] = useState('AdminPass123!');
+  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@example.com' : '');
+  const [password, setPassword] = useState(import.meta.env.DEV ? 'AdminPass123!' : '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,6 +31,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [selectedPodTab, setSelectedPodTab] = useState<string>('');
 
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
     fetch('/api/v1/auth/demo-accounts')
       .then((r) => r.json())
       .then((data) => {
@@ -62,9 +63,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     // In dev demo seeds, standard role passwords apply:
     if (roleHint === 'ADMIN') setPassword('AdminPass123!');
     else if (roleHint === 'OPERATIONS_MANAGER') setPassword('OpsManager123!');
-    else if (roleHint === 'POD_LEAD') setPassword('PodLead123!');
+    else if (roleHint === 'POD_LEAD') setPassword('PodLeadPass123!');
     else if (roleHint === 'BRAND_USER') setPassword('BrandPass123!');
-    else if (roleHint === 'EMPLOYEE') setPassword('EmpPass123!');
+    else if (roleHint === 'EMPLOYEE') setPassword('EmployeePass123!');
     else setPassword('SecretPass123!');
   };
 
@@ -138,115 +139,119 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             </button>
           </form>
 
-          {/* Quick-Fill Fast Demo Credentials */}
-          <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Quick Role Credentials
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowDirectory(!showDirectory)}
-                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                <span>{showDirectory ? 'Hide Full Pod Directory' : 'Explore All 58 Demo Accounts'}</span>
-                {showDirectory ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => selectQuickLogin('admin@example.com', 'ADMIN')}
-                className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
-              >
-                <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
-                  <Shield className="w-3 h-3 text-indigo-500" /> Admin
-                </span>
-                <span className="text-[10px] text-slate-500 font-mono truncate block">admin@example.com</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => selectQuickLogin('ops@example.com', 'OPERATIONS_MANAGER')}
-                className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
-              >
-                <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
-                  <Users className="w-3 h-3 text-purple-500" /> Ops Mgr
-                </span>
-                <span className="text-[10px] text-slate-500 font-mono truncate block">ops@example.com</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => selectQuickLogin('lead.alpha@example.com', 'POD_LEAD')}
-                className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
-              >
-                <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
-                  <Layers className="w-3 h-3 text-emerald-500" /> Pod Alpha
-                </span>
-                <span className="text-[10px] text-slate-500 font-mono truncate block">lead.alpha@...</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => selectQuickLogin('brand.stellar@example.com', 'BRAND_USER')}
-                className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
-              >
-                <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
-                  <Building2 className="w-3 h-3 text-amber-500" /> Brand User
-                </span>
-                <span className="text-[10px] text-slate-500 font-mono truncate block">brand.stellar@...</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Pod-Wise Interactive Directory Drawer */}
-          {showDirectory && demoAccounts && (
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3 animate-in fade-in">
-              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
-                Pod-Wise Workforce & Brand User Accounts
-              </span>
-
-              {/* Pod Tabs */}
-              <div className="flex flex-wrap gap-1.5 border-b border-slate-200 dark:border-slate-800 pb-2">
-                {Object.keys(demoAccounts.employees_by_pod || {}).map((podName) => (
+          {/* Quick-Fill Fast Demo Credentials & Directory (DEV-only) */}
+          {import.meta.env.DEV && (
+            <>
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Quick Role Credentials
+                  </span>
                   <button
-                    key={podName}
                     type="button"
-                    onClick={() => setSelectedPodTab(podName)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-                      selectedPodTab === podName
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                    }`}
+                    onClick={() => setShowDirectory(!showDirectory)}
+                    className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
                   >
-                    {podName}
+                    <span>{showDirectory ? 'Hide Full Pod Directory' : 'Explore All 58 Demo Accounts'}</span>
+                    {showDirectory ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
-                ))}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => selectQuickLogin('admin@example.com', 'ADMIN')}
+                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
+                  >
+                    <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
+                      <Shield className="w-3 h-3 text-indigo-500" /> Admin
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono truncate block">admin@example.com</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => selectQuickLogin('ops@example.com', 'OPERATIONS_MANAGER')}
+                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
+                  >
+                    <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
+                      <Users className="w-3 h-3 text-purple-500" /> Ops Mgr
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono truncate block">ops@example.com</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => selectQuickLogin('podalpha.lead@example.com', 'POD_LEAD')}
+                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
+                  >
+                    <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-emerald-500" /> Pod Alpha
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono truncate block">podalpha.lead@...</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => selectQuickLogin('brand.stellar@example.com', 'BRAND_USER')}
+                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
+                  >
+                    <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
+                      <Building2 className="w-3 h-3 text-amber-500" /> Brand User
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono truncate block">brand.stellar@...</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Employees in selected Pod */}
-              {selectedPodTab && demoAccounts.employees_by_pod[selectedPodTab] && (
-                <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-                  {demoAccounts.employees_by_pod[selectedPodTab].map((emp: any) => (
-                    <div
-                      key={emp.id}
-                      onClick={() => selectQuickLogin(emp.email, 'EMPLOYEE')}
-                      className="p-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-500 flex items-center justify-between cursor-pointer text-xs"
-                    >
-                      <div>
-                        <span className="font-semibold text-slate-900 dark:text-white block">{emp.name}</span>
-                        <span className="text-[10px] text-slate-500 font-mono">{emp.email}</span>
-                      </div>
-                      <span className="px-2 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                        Select Employee
-                      </span>
+              {/* Pod-Wise Interactive Directory Drawer */}
+              {showDirectory && demoAccounts && (
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3 animate-in fade-in">
+                  <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                    Pod-Wise Workforce & Brand User Accounts
+                  </span>
+
+                  {/* Pod Tabs */}
+                  <div className="flex flex-wrap gap-1.5 border-b border-slate-200 dark:border-slate-800 pb-2">
+                    {Object.keys(demoAccounts.employees_by_pod || {}).map((podName) => (
+                      <button
+                        key={podName}
+                        type="button"
+                        onClick={() => setSelectedPodTab(podName)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                          selectedPodTab === podName
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                        }`}
+                      >
+                        {podName}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Employees in selected Pod */}
+                  {selectedPodTab && demoAccounts.employees_by_pod[selectedPodTab] && (
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                      {demoAccounts.employees_by_pod[selectedPodTab].map((emp: any) => (
+                        <div
+                          key={emp.id}
+                          onClick={() => selectQuickLogin(emp.email, 'EMPLOYEE')}
+                          className="p-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-500 flex items-center justify-between cursor-pointer text-xs"
+                        >
+                          <div>
+                            <span className="font-semibold text-slate-900 dark:text-white block">{emp.name}</span>
+                            <span className="text-[10px] text-slate-500 font-mono">{emp.email}</span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                            Select Employee
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>

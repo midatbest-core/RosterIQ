@@ -16,6 +16,8 @@ import {
   HelpCircle,
   Activity,
   ChevronRight,
+  Download,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export const BrandPortalScreen: React.FC = () => {
@@ -23,8 +25,37 @@ export const BrandPortalScreen: React.FC = () => {
   const [requests, setRequests] = useState<BrandChangeRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportingGoogle, setExportingGoogle] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const handleExportBrandSchedule = async () => {
+    try {
+      setExporting(true);
+      setError(null);
+      await api.exportBrandScheduleCsv();
+    } catch (err: any) {
+      setError(err.message || 'Failed to export brand schedule');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportGoogleSheets = async () => {
+    try {
+      setExportingGoogle(true);
+      setError(null);
+      const res = await api.exportBrandGoogleSheets();
+      if (res && res.spreadsheet_url) {
+        window.open(res.spreadsheet_url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Google Sheets export failed. Direct CSV export is available.');
+    } finally {
+      setExportingGoogle(false);
+    }
+  };
 
   // Modal form state
   const [showRequestModal, setShowRequestModal] = useState(false);
@@ -248,12 +279,37 @@ export const BrandPortalScreen: React.FC = () => {
       {/* Active Operating Patterns Overview */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-indigo-400" /> Current Operating Plan & Processes
-          </h2>
-          <span className="text-xs text-slate-400">
-            Changes require Operations Manager approval and roster re-sync
-          </span>
+          <div>
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-indigo-400" /> Current Operating Plan & Processes
+            </h2>
+            <span className="text-xs text-slate-400">
+              Changes require Operations Manager approval and roster re-sync
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleExportBrandSchedule}
+              disabled={exporting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+              title="Export brand monthly roster schedule as CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportGoogleSheets}
+              disabled={exportingGoogle}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-800 text-xs font-semibold transition-colors cursor-pointer"
+              title="Export brand monthly roster schedule to Google Sheets"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{exportingGoogle ? 'Exporting...' : 'Google Sheets'}</span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

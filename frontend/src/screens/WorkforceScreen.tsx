@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Employee, Pod, EmployeeUnavailability } from '../services/types';
+import { Employee, Pod, EmployeeUnavailability, User } from '../services/types';
 import { Modal } from '../components/common/Modal';
 import { DetailDrawer } from '../components/layout/DetailDrawer';
 import { StatusBadge } from '../components/common/StatusBadge';
@@ -23,12 +23,15 @@ import {
 interface WorkforceScreenProps {
   initialSubTab?: 'employees' | 'pods' | 'leaves';
   searchQuery?: string;
+  currentUser?: User | null;
 }
 
 export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   initialSubTab = 'employees',
   searchQuery = '',
+  currentUser,
 }) => {
+  const isPodLead = currentUser?.role === 'POD_LEAD';
   const [subTab, setSubTab] = useState<'employees' | 'pods' | 'leaves'>(initialSubTab);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [pods, setPods] = useState<Pod[]>([]);
@@ -174,7 +177,11 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
     }
   };
 
-  const filteredEmployees = employees.filter((emp) => {
+  const targetEmployees = isPodLead && currentUser?.pod_id
+    ? employees.filter((emp) => emp.pod_id === currentUser.pod_id)
+    : employees;
+
+  const filteredEmployees = targetEmployees.filter((emp) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -189,61 +196,75 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
       {/* Sub-Tabs Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
         <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200/60">
-          <button
-            onClick={() => setSubTab('employees')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-              subTab === 'employees'
-                ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Employees Directory ({employees.length})</span>
-          </button>
-          <button
-            onClick={() => setSubTab('pods')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-              subTab === 'pods'
-                ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Network className="w-3.5 h-3.5" />
-            <span>Pods & Leads ({pods.length})</span>
-          </button>
-          <button
-            onClick={() => setSubTab('leaves')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-              subTab === 'leaves'
-                ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <CalendarOff className="w-3.5 h-3.5" />
-            <span>Availability & Leave</span>
-          </button>
+          {isPodLead ? (
+            <button
+              onClick={() => setSubTab('employees')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-white text-indigo-700 shadow-2xs border border-slate-200/50"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Pod Members ({filteredEmployees.length})</span>
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => setSubTab('employees')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  subTab === 'employees'
+                    ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Employees Directory ({employees.length})</span>
+              </button>
+              <button
+                onClick={() => setSubTab('pods')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  subTab === 'pods'
+                    ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Network className="w-3.5 h-3.5" />
+                <span>Pods & Leads ({pods.length})</span>
+              </button>
+              <button
+                onClick={() => setSubTab('leaves')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  subTab === 'leaves'
+                    ? 'bg-white text-indigo-700 shadow-2xs border border-slate-200/50'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <CalendarOff className="w-3.5 h-3.5" />
+                <span>Availability & Leave</span>
+              </button>
+            </>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
-          {subTab === 'employees' && (
-            <button
-              onClick={() => setShowAddEmp(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Employee</span>
-            </button>
-          )}
-          {subTab === 'pods' && (
-            <button
-              onClick={() => setShowAddPod(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Create Pod</span>
-            </button>
-          )}
-        </div>
+        {!isPodLead && (
+          <div className="flex items-center gap-2">
+            {subTab === 'employees' && (
+              <button
+                onClick={() => setShowAddEmp(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Employee</span>
+              </button>
+            )}
+            {subTab === 'pods' && (
+              <button
+                onClick={() => setShowAddPod(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Create Pod</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (

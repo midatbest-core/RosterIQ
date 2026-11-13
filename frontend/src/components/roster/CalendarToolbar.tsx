@@ -10,8 +10,10 @@ import {
   GitBranch,
   Filter,
   Calendar,
+  Download,
+  FileSpreadsheet,
 } from 'lucide-react';
-import { RosterSummary } from '../../services/types';
+import { RosterSummary, User } from '../../services/types';
 import { StatusBadge } from '../common/StatusBadge';
 
 export type RosterViewMode = 'company' | 'pod' | 'brand' | 'process' | 'employee';
@@ -26,11 +28,17 @@ interface CalendarToolbarProps {
   onPublish: () => void;
   onCreateChildVersion: () => void;
   onOpenGenerateModal: () => void;
+  onOpenConflicts?: () => void;
+  onExportCsv?: () => void;
+  isExporting?: boolean;
+  onExportGoogleSheets?: () => void;
+  isExportingGoogle?: boolean;
   filterId: string;
   onFilterChange: (id: string) => void;
   filterOptions: { id: string; name: string }[];
   filterLabel: string;
   isPublishing?: boolean;
+  currentUser?: User | null;
 }
 
 export const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
@@ -42,19 +50,29 @@ export const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
   onPublish,
   onCreateChildVersion,
   onOpenGenerateModal,
+  onOpenConflicts,
+  onExportCsv,
+  isExporting = false,
+  onExportGoogleSheets,
+  isExportingGoogle = false,
   filterId,
   onFilterChange,
   filterOptions,
   filterLabel,
   isPublishing = false,
+  currentUser,
 }) => {
-  const views: { id: RosterViewMode; label: string; icon: React.FC<{ className?: string }> }[] = [
-    { id: 'company', label: 'Company-Wide', icon: Users },
-    { id: 'pod', label: 'Pod-Wise', icon: Network },
-    { id: 'brand', label: 'Brand-Wise', icon: Briefcase },
-    { id: 'process', label: 'Process-Wise', icon: Layers },
-    { id: 'employee', label: 'Employee-Wise', icon: UserCheck },
-  ];
+  const isPodLead = currentUser?.role === 'POD_LEAD';
+
+  const views: { id: RosterViewMode; label: string; icon: React.FC<{ className?: string }> }[] = isPodLead
+    ? [{ id: 'pod', label: 'Pod Work Distribution', icon: Network }]
+    : [
+        { id: 'company', label: 'Company-Wide', icon: Users },
+        { id: 'pod', label: 'Pod-Wise', icon: Network },
+        { id: 'brand', label: 'Brand-Wise', icon: Briefcase },
+        { id: 'process', label: 'Process-Wise', icon: Layers },
+        { id: 'employee', label: 'Employee-Wise', icon: UserCheck },
+      ];
 
   const isPublished = currentRoster?.status === 'PUBLISHED';
   const hasHardConflicts = (currentRoster?.hard_violations_count ?? 0) > 0;
@@ -96,47 +114,88 @@ export const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
             </div>
           )}
 
-          {/* If Published -> Offer Create Child Revision */}
-          {isPublished ? (
-            <button
-              onClick={onCreateChildVersion}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-            >
-              <GitBranch className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Create Child Revision</span>
-            </button>
-          ) : (
-            /* If Draft/Validated -> Offer Publish Roster */
-            currentRoster && (
+          {currentRoster && onExportCsv && (
+            <div className="flex items-center gap-1.5">
               <button
-                onClick={onPublish}
-                disabled={hasHardConflicts || isStale || isPublishing}
-                title={
-                  hasHardConflicts
-                    ? 'Resolve all hard conflicts before publishing'
-                    : isStale
-                    ? 'Roster is stale due to configuration drift. Regenerate before publishing.'
-                    : 'Publish roster to lock changes'
-                }
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer ${
-                  hasHardConflicts || isStale || isPublishing
-                    ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
-                }`}
+                onClick={onExportCsv}
+                disabled={isExporting}
+                title={`Export ${viewMode.toUpperCase()} schedule as CSV`}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer"
               >
-                <Lock className="w-3.5 h-3.5" />
-                <span>{isPublishing ? 'Publishing...' : 'Publish Roster'}</span>
+                <Download className="w-3.5 h-3.5 text-slate-500" />
+                <span>{isExporting ? 'Exporting...' : 'Export CSV'}</span>
               </button>
-            )
+
+              {onExportGoogleSheets && (
+                <button
+                  onClick={onExportGoogleSheets}
+                  disabled={isExportingGoogle}
+                  title={`Export ${viewMode.toUpperCase()} schedule to Google Sheets`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{isExportingGoogle ? 'Exporting...' : 'Google Sheets'}</span>
+                </button>
+              )}
+            </div>
           )}
 
-          <button
-            onClick={onOpenGenerateModal}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-xs shadow-indigo-600/30 transition-all cursor-pointer"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Generate Roster</span>
-          </button>
+          {/* If Published -> Offer Create Child Revision */}
+          {/* Direct Auto-Resolver Quick Trigger from Calendar */}
+          {hasHardConflicts && onOpenConflicts && (
+            <button
+              onClick={onOpenConflicts}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-xs font-bold transition-all shadow-2xs animate-pulse cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-rose-600" />
+              <span>Resolve {currentRoster?.hard_violations_count} Conflicts</span>
+            </button>
+          )}
+
+          {!isPodLead && (
+            <>
+              {isPublished ? (
+                <button
+                  onClick={onCreateChildVersion}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <GitBranch className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Create Child Revision</span>
+                </button>
+              ) : (
+                /* If Draft/Validated -> Offer Publish Roster */
+                currentRoster && (
+                  <button
+                    onClick={onPublish}
+                    disabled={hasHardConflicts || isStale || isPublishing}
+                    title={
+                      hasHardConflicts
+                        ? 'Resolve all hard conflicts before publishing'
+                        : isStale
+                        ? 'Roster is stale due to configuration drift. Regenerate before publishing.'
+                        : 'Publish roster to lock changes'
+                    }
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer ${
+                      hasHardConflicts || isStale || isPublishing
+                        ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
+                    }`}
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>{isPublishing ? 'Publishing...' : 'Publish Roster'}</span>
+                  </button>
+                )
+              )}
+
+              <button
+                onClick={onOpenGenerateModal}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-xs shadow-indigo-600/30 transition-all cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Generate Roster</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 

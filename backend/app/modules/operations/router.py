@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.db.session import get_db
-from app.modules.auth.dependencies import require_manager, verify_csrf
+from app.modules.auth.dependencies import require_lead_or_manager, require_manager, verify_csrf
 from app.modules.operations.models import (
     Brand,
     BrandProcess,
@@ -36,8 +36,8 @@ from app.modules.operations.schemas import (
 )
 from app.modules.workforce.models import Employee, EmployeeStatus
 
-router = APIRouter(tags=["operations"], dependencies=[Depends(require_manager)])
-mutation_dependencies = [Depends(verify_csrf)]
+router = APIRouter(tags=["operations"], dependencies=[Depends(require_lead_or_manager)])
+mutation_dependencies = [Depends(require_manager), Depends(verify_csrf)]
 
 
 def require_record(db: Session, model: type, record_id: UUID, code: str, label: str):
@@ -353,7 +353,7 @@ def ensure_no_assignment_overlap(
         )
 
 
-@router.get("/assignments", response_model=list[PrimaryAssignmentRead])
+@router.get("/assignments", response_model=list[PrimaryAssignmentRead], dependencies=[Depends(require_manager)])
 def list_assignments(
     employee_id: UUID | None = None,
     brand_process_id: UUID | None = None,
@@ -392,7 +392,7 @@ def create_assignment(
     return assignment
 
 
-@router.get("/assignments/{assignment_id}", response_model=PrimaryAssignmentRead)
+@router.get("/assignments/{assignment_id}", response_model=PrimaryAssignmentRead, dependencies=[Depends(require_manager)])
 def get_assignment(assignment_id: UUID, db: Session = Depends(get_db)) -> PrimaryAssignment:
     return require_record(db, PrimaryAssignment, assignment_id, "ASSIGNMENT_NOT_FOUND", "Assignment")
 

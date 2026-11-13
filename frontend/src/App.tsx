@@ -16,6 +16,8 @@ import { BrandPortalScreen } from './screens/BrandPortalScreen';
 import { EmployeePortalScreen } from './screens/EmployeePortalScreen';
 import { RequestsCenterScreen } from './screens/RequestsCenterScreen';
 import { GenerateRosterModal } from './components/roster/GenerateRosterModal';
+import { NotificationBell } from './components/notifications/NotificationBell';
+import { useNotifications } from './hooks/useNotifications';
 import { Activity } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -27,9 +29,26 @@ export const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showGenerateModal, setShowGenerateModal] = useState(false);
 
+  const {
+    notifications,
+    unreadCount,
+    isConnected,
+    markAsRead,
+    deleteNotification,
+  } = useNotifications(currentUser);
+
   useEffect(() => {
     checkAuth();
   }, []);
+
+  useEffect(() => {
+    if (currentUser?.role === 'POD_LEAD') {
+      const allowedTabs: NavTab[] = ['roster', 'analytics', 'conflicts', 'employees', 'requests'];
+      if (!allowedTabs.includes(activeTab)) {
+        setActiveTab('roster');
+      }
+    }
+  }, [currentUser, activeTab]);
 
   const checkAuth = async () => {
     try {
@@ -103,6 +122,13 @@ export const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <NotificationBell
+              notifications={notifications}
+              unreadCount={unreadCount}
+              isConnected={isConnected}
+              onMarkAsRead={markAsRead}
+              onDelete={deleteNotification}
+            />
             <div className="text-right">
               <p className="text-xs font-semibold text-white">{currentUser.email}</p>
               <p className="text-[11px] text-slate-400 capitalize">{currentUser.role.replace('_', ' ')}</p>
@@ -137,6 +163,13 @@ export const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <NotificationBell
+              notifications={notifications}
+              unreadCount={unreadCount}
+              isConnected={isConnected}
+              onMarkAsRead={markAsRead}
+              onDelete={deleteNotification}
+            />
             <div className="text-right">
               <p className="text-xs font-semibold text-white">{currentUser.email}</p>
               <p className="text-[11px] text-slate-400">Employee Workspace</p>
@@ -169,6 +202,12 @@ export const App: React.FC = () => {
       onOpenGenerateModal={() => setShowGenerateModal(true)}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
+      notifications={notifications}
+      unreadCount={unreadCount}
+      isConnected={isConnected}
+      onMarkNotificationAsRead={markAsRead}
+      onDeleteNotification={deleteNotification}
+      onNavigateToRequest={() => setActiveTab('requests')}
     >
       {/* Dynamic View Router */}
       {activeTab === 'dashboard' && (
@@ -185,6 +224,7 @@ export const App: React.FC = () => {
           rosters={rosters}
           selectedRosterId={selectedRosterId}
           onNavigateTab={setActiveTab}
+          currentUser={currentUser}
         />
       )}
 
@@ -194,6 +234,7 @@ export const App: React.FC = () => {
           selectedRosterId={selectedRosterId}
           onRefreshRosters={loadRosters}
           onNavigateToConflicts={() => setActiveTab('conflicts')}
+          onSelectRosterId={(id) => setSelectedRosterId(id)}
         />
       )}
 
@@ -204,6 +245,8 @@ export const App: React.FC = () => {
           onRefreshRosters={loadRosters}
           onOpenGenerateModal={() => setShowGenerateModal(true)}
           searchQuery={searchQuery}
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+          currentUser={currentUser}
         />
       )}
 
@@ -212,6 +255,7 @@ export const App: React.FC = () => {
           rosters={rosters}
           selectedRosterId={selectedRosterId}
           onRefreshRosters={loadRosters}
+          currentUser={currentUser}
         />
       )}
 
@@ -223,15 +267,15 @@ export const App: React.FC = () => {
       )}
 
       {activeTab === 'employees' && (
-        <WorkforceScreen initialSubTab="employees" searchQuery={searchQuery} />
+        <WorkforceScreen initialSubTab="employees" searchQuery={searchQuery} currentUser={currentUser} />
       )}
 
       {activeTab === 'pods' && (
-        <WorkforceScreen initialSubTab="pods" searchQuery={searchQuery} />
+        <WorkforceScreen initialSubTab="pods" searchQuery={searchQuery} currentUser={currentUser} />
       )}
 
       {activeTab === 'leaves' && (
-        <WorkforceScreen initialSubTab="leaves" searchQuery={searchQuery} />
+        <WorkforceScreen initialSubTab="leaves" searchQuery={searchQuery} currentUser={currentUser} />
       )}
 
       {activeTab === 'brands' && <OperationsScreen initialSubTab="brands" />}

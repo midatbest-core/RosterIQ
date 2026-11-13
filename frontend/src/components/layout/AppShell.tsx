@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Sidebar, NavTab } from './Sidebar';
 import { Topbar } from './Topbar';
-import { User, RosterSummary } from '../../services/types';
+import { User, RosterSummary, AppNotification } from '../../services/types';
 
 interface AppShellProps {
   currentUser: User | null;
@@ -15,6 +15,12 @@ interface AppShellProps {
   onOpenGenerateModal: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  notifications?: AppNotification[];
+  unreadCount?: number;
+  isConnected?: boolean;
+  onMarkNotificationAsRead?: (id: string) => void;
+  onDeleteNotification?: (id: string) => void;
+  onNavigateToRequest?: (refType: string, refId: string) => void;
   children: React.ReactNode;
 }
 
@@ -30,6 +36,12 @@ export const AppShell: React.FC<AppShellProps> = ({
   onOpenGenerateModal,
   searchQuery,
   onSearchChange,
+  notifications = [],
+  unreadCount = 0,
+  isConnected = false,
+  onMarkNotificationAsRead = () => {},
+  onDeleteNotification,
+  onNavigateToRequest,
   children,
 }) => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -44,6 +56,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         conflictCount={conflictCount}
         onOpenGenerateModal={onOpenGenerateModal}
+        currentUser={currentUser}
       />
 
       {/* Main Column */}
@@ -60,6 +73,12 @@ export const AppShell: React.FC<AppShellProps> = ({
           onOpenConflicts={() => onSelectTab('conflicts')}
           searchQuery={searchQuery}
           onSearchChange={onSearchChange}
+          notifications={notifications}
+          unreadCount={unreadCount}
+          isConnected={isConnected}
+          onMarkNotificationAsRead={onMarkNotificationAsRead}
+          onDeleteNotification={onDeleteNotification}
+          onNavigateToRequest={onNavigateToRequest}
         />
 
         {/* Dynamic Page Content */}

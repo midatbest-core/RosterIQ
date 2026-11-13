@@ -16,6 +16,7 @@ import {
   ResolverPreviewResponse,
   ResolverApplyRequest,
   ResolverApplyResponse,
+  AppNotification,
 } from './types';
 
 const BASE_URL = '/api/v1';
@@ -60,13 +61,20 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const api = {
   // Auth
-  login: (email: string, password: string) =>
-    request<User>('/auth/login', {
+  login: async (email: string, password: string): Promise<User> => {
+    const res = await request<{ user: User; csrf_token: string } | User>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
-    }),
+    });
+    return (res as any).user ? (res as any).user : (res as User);
+  },
   getCurrentUser: () => request<User>('/auth/me'),
   logout: () => request<{ message: string }>('/auth/logout', { method: 'POST' }),
+  getNotifications: () => request<AppNotification[]>('/auth/notifications'),
+  markNotificationRead: (id: string) =>
+    request<{ status: string }>(`/auth/notifications/${id}/read`, { method: 'POST' }),
+  deleteNotification: (id: string) =>
+    request<{ status: string; id: string }>(`/auth/notifications/${id}`, { method: 'DELETE' }),
 
   // Workforce
   getPods: () => request<Pod[]>('/pods'),
@@ -268,7 +276,16 @@ export const api = {
     if (params.length > 0) url += `?${params.join('&')}`;
     return request<import('./types').EmployeeTaskItem[]>(url);
   },
+  getPodAllocations: (month?: number, year?: number) => {
+    let url = '/employee-portal/pod-allocations';
+    const params: string[] = [];
+    if (month) params.push(`month=${month}`);
+    if (year) params.push(`year=${year}`);
+    if (params.length > 0) url += `?${params.join('&')}`;
+    return request<import('./types').EmployeeTaskItem[]>(url);
+  },
   submitEmployeeRequest: (data: {
+    employee_id?: string;
     request_type: string;
     start_date: string;
     end_date: string;
@@ -284,15 +301,19 @@ export const api = {
     request<import('./types').EmployeeAvailabilityRequest[]>('/employee-portal/requests'),
   getEmployeeRequestDetail: (requestId: string) =>
     request<import('./types').EmployeeAvailabilityRequest>(`/employee-portal/requests/${requestId}`),
-  previewEmployeeRequestImpact: (requestId: string) =>
-    request<import('./types').EmployeeImpactPreview>(`/employee-portal/requests/${requestId}/preview-impact`, {
-      method: 'POST',
-    }),
-  approveEmployeeRequest: (requestId: string, managerNotes?: string) =>
-    request<import('./types').EmployeeAvailabilityRequest>(`/employee-portal/requests/${requestId}/approve`, {
+  previewEmployeeRequestImpact: (requestId: string, rosterId?: string) => {
+    let url = `/employee-portal/requests/${requestId}/preview-impact`;
+    if (rosterId) url += `?roster_id=${rosterId}`;
+    return request<import('./types').EmployeeImpactPreview>(url, { method: 'POST' });
+  },
+  approveEmployeeRequest: (requestId: string, managerNotes?: string, rosterId?: string) => {
+    let url = `/employee-portal/requests/${requestId}/approve`;
+    if (rosterId) url += `?roster_id=${rosterId}`;
+    return request<import('./types').EmployeeAvailabilityRequest>(url, {
       method: 'POST',
       body: JSON.stringify({ manager_notes: managerNotes }),
-    }),
+    });
+  },
   rejectEmployeeRequest: (requestId: string, managerNotes: string) =>
     request<import('./types').EmployeeAvailabilityRequest>(`/employee-portal/requests/${requestId}/reject`, {
       method: 'POST',
@@ -302,5 +323,168 @@ export const api = {
     let url = `/employee-portal/requests/${requestId}/mark-implemented`;
     if (rosterId) url += `?roster_id=${rosterId}`;
     return request<import('./types').EmployeeAvailabilityRequest>(url, { method: 'POST' });
+  },
+
+  exportRosterCsv: async (rosterId: string, viewType: string = 'company', filterId?: string): Promise<void> => {
+    const params = new URLSearchParams();
+    if (viewType) params.append('view_type', viewType);
+    if (filterId) params.append('filter_id', filterId);
+    const url = `${BASE_URL}/rosters/${rosterId}/export/csv?${params.toString()}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      let errorDetail = 'Export failed';
+      try {
+        const errJson = await response.json();
+        errorDetail = errJson.detail || errJson.message || errorDetail;
+      } catch {
+        errorDetail = await response.text();
+      }
+      throw new Error(errorDetail);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition');
+    let filename = `roster_${viewType}.csv`;
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) filename = match[1];
+    }
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
+
+  exportBrandScheduleCsv: async (rosterId?: string): Promise<void> => {
+    const url = rosterId ? `${BASE_URL}/brand-portal/export/csv?roster_id=${rosterId}` : `${BASE_URL}/brand-portal/export/csv`;
+    const response = await fetch(url, { method: 'GET', credentials: 'include' });
+    if (!response.ok) {
+      let errorDetail = 'Export failed';
+      try {
+        const errJson = await response.json();
+        errorDetail = errJson.detail || errJson.message || errorDetail;
+      } catch {
+        errorDetail = await response.text();
+      }
+      throw new Error(errorDetail);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition');
+    let filename = 'brand_schedule.csv';
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) filename = match[1];
+    }
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
+
+  exportEmployeeScheduleCsv: async (rosterId?: string): Promise<void> => {
+    const url = rosterId ? `${BASE_URL}/employee-portal/export/csv?roster_id=${rosterId}` : `${BASE_URL}/employee-portal/export/csv`;
+    const response = await fetch(url, { method: 'GET', credentials: 'include' });
+    if (!response.ok) {
+      let errorDetail = 'Export failed';
+      try {
+        const errJson = await response.json();
+        errorDetail = errJson.detail || errJson.message || errorDetail;
+      } catch {
+        errorDetail = await response.text();
+      }
+      throw new Error(errorDetail);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition');
+    let filename = 'my_schedule.csv';
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) filename = match[1];
+    }
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
+
+  getGoogleSheetsStatus: async (): Promise<{
+    enabled: boolean;
+    client_id_configured: boolean;
+    service_account_configured: boolean;
+    message: string;
+    scopes: string[];
+  }> => {
+    return request('/rosters/export/google-sheets/status');
+  },
+
+  exportRosterGoogleSheets: async (
+    rosterId: string,
+    viewType: string = 'company',
+    filterId?: string,
+    googleAccessToken?: string
+  ): Promise<{
+    spreadsheet_id: string;
+    spreadsheet_url: string;
+    title: string;
+    rows_exported: number;
+  }> => {
+    return request(`/rosters/${rosterId}/export/google-sheets`, {
+      method: 'POST',
+      body: JSON.stringify({
+        view_type: viewType,
+        filter_id: filterId || null,
+        google_access_token: googleAccessToken || null,
+      }),
+    });
+  },
+
+  exportBrandGoogleSheets: async (
+    rosterId?: string,
+    googleAccessToken?: string
+  ): Promise<{
+    spreadsheet_id: string;
+    spreadsheet_url: string;
+    title: string;
+    rows_exported: number;
+  }> => {
+    return request('/brand-portal/export/google-sheets', {
+      method: 'POST',
+      body: JSON.stringify({
+        roster_id: rosterId || null,
+        google_access_token: googleAccessToken || null,
+      }),
+    });
+  },
+
+  exportEmployeeGoogleSheets: async (
+    rosterId?: string,
+    googleAccessToken?: string
+  ): Promise<{
+    spreadsheet_id: string;
+    spreadsheet_url: string;
+    title: string;
+    rows_exported: number;
+  }> => {
+    return request('/employee-portal/export/google-sheets', {
+      method: 'POST',
+      body: JSON.stringify({
+        roster_id: rosterId || null,
+        google_access_token: googleAccessToken || null,
+      }),
+    });
   },
 };

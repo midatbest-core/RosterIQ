@@ -10,7 +10,14 @@ from app.modules.operations.models import Brand, Process, BrandProcess
 from app.modules.workforce.models import Employee, Pod, PodLead
 from app.modules.workforce.availability_models import AbsenceReasonType, EmployeeUnavailability
 from app.modules.workforce.request_models import EmployeeAvailabilityRequest
-from app.modules.roster.models import Roster, EmployeeShift, RosterAllocation, AllocationType, RosterStatus
+from app.modules.roster.models import (
+    AllocationType,
+    EmployeeShift,
+    Roster,
+    RosterAllocation,
+    RosterConflict,
+    RosterStatus,
+)
 from app.core.security import hash_password
 
 
@@ -266,6 +273,21 @@ def test_employee_portal_scoping_and_workflow(client: TestClient, db_session: Se
     assert unavail.reason_type == AbsenceReasonType.PLANNED_LEAVE
 
     # 7. Complete lifecycle to IMPLEMENTED
+    # Target roster must be published and conflicting allocations resolved
+    target_r_id = approve_resp.json().get("implemented_roster_id")
+    if target_r_id:
+        target_r = db_session.get(Roster, uuid.UUID(target_r_id))
+        for a in db_session.query(RosterAllocation).filter(
+            RosterAllocation.roster_id == target_r.id,
+            RosterAllocation.employee_id == emp_alice.id,
+            RosterAllocation.date == target_date,
+        ).all():
+            db_session.delete(a)
+        for c in db_session.query(RosterConflict).filter(RosterConflict.roster_id == target_r.id).all():
+            db_session.delete(c)
+        target_r.status = RosterStatus.PUBLISHED
+        db_session.commit()
+
     impl_resp = client.post(f"/api/v1/employee-portal/requests/{req_id}/mark-implemented", headers=csrf_headers(client))
     assert impl_resp.status_code == 200
     assert impl_resp.json()["status"] == "IMPLEMENTED"

@@ -20,17 +20,51 @@ import {
   HelpCircle,
   Activity,
   Layers,
-  ChevronRight,
+  Download,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export const EmployeePortalScreen: React.FC = () => {
   const [profile, setProfile] = useState<EmployeeProfile | null>(null);
   const [tasks, setTasks] = useState<EmployeeTaskItem[]>([]);
+  const [podTasks, setPodTasks] = useState<EmployeeTaskItem[]>([]);
+  const [scheduleTab, setScheduleTab] = useState<'my' | 'pod'>('my');
   const [requests, setRequests] = useState<EmployeeAvailabilityRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportingGoogle, setExportingGoogle] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const handleExportMySchedule = async () => {
+    if (!tasks || tasks.length === 0 || !profile?.employee_id) return;
+    try {
+      setExporting(true);
+      setError(null);
+      await api.exportRosterCsv(tasks[0].roster_id, 'employee', profile.employee_id);
+    } catch (err: any) {
+      setError(err.message || 'Failed to export schedule');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportGoogleSheets = async () => {
+    if (!tasks || tasks.length === 0 || !profile?.employee_id) return;
+    try {
+      setExportingGoogle(true);
+      setError(null);
+      const res = await api.exportEmployeeGoogleSheets(tasks[0].roster_id);
+      if (res && res.spreadsheet_url) {
+        window.open(res.spreadsheet_url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Google Sheets export failed. Direct CSV export is available.');
+    } finally {
+      setExportingGoogle(false);
+    }
+  };
 
   // Month / Year filter for checklist
   const [selectedMonth, setSelectedMonth] = useState<number>(11);
@@ -52,13 +86,15 @@ export const EmployeePortalScreen: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const [profData, tasksData, reqsData] = await Promise.all([
+      const [profData, tasksData, podData, reqsData] = await Promise.all([
         api.getEmployeeProfile(),
         api.getEmployeeTasks(selectedMonth, selectedYear),
+        api.getPodAllocations(selectedMonth, selectedYear).catch(() => []),
         api.getEmployeeRequests(),
       ]);
       setProfile(profData);
       setTasks(tasksData);
+      setPodTasks(podData);
       setRequests(reqsData);
     } catch (err: any) {
       setError(err.message || 'Failed to load employee portal data');
@@ -261,11 +297,67 @@ export const EmployeePortalScreen: React.FC = () => {
       <div className="space-y-4 pt-2">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-indigo-400" /> My Shift & Task Checklist
-            </h2>
-            <p className="text-xs text-slate-400">
-              Allocated work shifts across active published & draft operational rosters
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-indigo-400" />
+                {scheduleTab === 'my' ? 'My Confirmed Shifts' : `${profile?.pod_name || 'My Pod'} Allocations`}
+              </h2>
+              {/* Tab Pills */}
+              <div className="flex items-center rounded-lg bg-slate-900 border border-slate-800 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setScheduleTab('my')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors ${
+                    scheduleTab === 'my'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  My Shifts ({tasks.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScheduleTab('pod')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors ${
+                    scheduleTab === 'pod'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Pod Allocation ({podTasks.length})
+                </button>
+              </div>
+
+              {tasks.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleExportMySchedule}
+                    disabled={exporting}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
+                    title="Export my schedule as CSV"
+                  >
+                    <Download className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportGoogleSheets}
+                    disabled={exportingGoogle}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-800 text-xs font-medium transition-colors cursor-pointer"
+                    title="Export my schedule to Google Sheets"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{exportingGoogle ? 'Exporting...' : 'Google Sheets'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              {scheduleTab === 'my'
+                ? 'Your scheduled shifts from published production rosters'
+                : 'Team member shift assignments within your assigned pod'}
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs">
@@ -293,12 +385,16 @@ export const EmployeePortalScreen: React.FC = () => {
           </div>
         </div>
 
-        {tasks.length === 0 ? (
+        {(scheduleTab === 'my' ? tasks : podTasks).length === 0 ? (
           <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-8 text-center text-slate-400 space-y-2">
             <Calendar className="w-8 h-8 text-slate-600 mx-auto" />
-            <p className="text-sm font-medium">No shifts scheduled for this period.</p>
+            <p className="text-sm font-medium">
+              {scheduleTab === 'my'
+                ? 'No published shifts scheduled for you this month.'
+                : 'No published allocations for your pod this month.'}
+            </p>
             <p className="text-xs text-slate-500">
-              When a roster is generated or published, your assigned shifts and brand tasks will appear here.
+              Only shifts from published production rosters are shown here.
             </p>
           </div>
         ) : (
@@ -307,6 +403,7 @@ export const EmployeePortalScreen: React.FC = () => {
               <table className="w-full text-left text-sm text-slate-300">
                 <thead className="bg-slate-950/60 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
                   <tr>
+                    {scheduleTab === 'pod' && <th className="px-4 py-3">Team Member</th>}
                     <th className="px-4 py-3">Date</th>
                     <th className="px-4 py-3">Day</th>
                     <th className="px-4 py-3">Brand & Process</th>
@@ -316,8 +413,13 @@ export const EmployeePortalScreen: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {tasks.map((task) => (
+                  {(scheduleTab === 'my' ? tasks : podTasks).map((task) => (
                     <tr key={task.allocation_id} className="hover:bg-slate-800/30 transition-colors">
+                      {scheduleTab === 'pod' && (
+                        <td className="px-4 py-3 whitespace-nowrap text-xs font-semibold text-white">
+                          {task.employee_name || 'Pod Colleague'}
+                        </td>
+                      )}
                       <td className="px-4 py-3 whitespace-nowrap text-xs font-mono font-medium text-white">
                         {task.date}
                       </td>
@@ -346,7 +448,7 @@ export const EmployeePortalScreen: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-xs">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/60 text-emerald-300 border border-emerald-800">
                           {task.roster_status}
                         </span>
                       </td>

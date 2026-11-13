@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import calendar
+import csv
 from datetime import date, datetime, time, timezone
 import hashlib
+import io
+import re
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import AppError
 from app.db.session import get_db
-from app.modules.auth.dependencies import require_manager
+from app.modules.auth.dependencies import get_current_user, require_manager, require_lead_or_manager
 from app.modules.auth.models import User, UserRole
 from app.modules.operations.models import (
     Brand,
@@ -390,24 +394,33 @@ def list_rosters(
     month: int | None = None,
     year: int | None = None,
     db: Session = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_lead_or_manager),
 ) -> list[RosterSummaryResponse]:
     current_hash = compute_config_hash(db)
     check_and_mark_stale_rosters(db, current_hash)
     db.commit()
 
-    query = select(Roster).order_by(Roster.year.desc(), Roster.month.desc(), Roster.version.desc())
+    query = select(Roster).order_by(Roster.created_at.desc(), Roster.version.desc())
     if month is not None:
         query = query.where(Roster.month == month)
     if year is not None:
         query = query.where(Roster.year == year)
 
+    pod_emp_ids: set[uuid.UUID] = set()
+    if _user.role == UserRole.POD_LEAD and _user.pod_id:
+        pod_emp_ids = set(db.scalars(select(Employee.id).where(Employee.pod_id == _user.pod_id)).all())
+
     rosters = db.scalars(query).all()
     results = []
     for r in rosters:
-        shifts_count = db.scalar(select(func.count()).select_from(EmployeeShift).where(EmployeeShift.roster_id == r.id)) or 0
-        allocs_count = db.scalar(select(func.count()).select_from(RosterAllocation).where(RosterAllocation.roster_id == r.id)) or 0
-        conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == r.id)).all()
+        if _user.role == UserRole.POD_LEAD and pod_emp_ids:
+            shifts_count = db.scalar(select(func.count()).select_from(EmployeeShift).where(EmployeeShift.roster_id == r.id, EmployeeShift.employee_id.in_(pod_emp_ids))) or 0
+            allocs_count = db.scalar(select(func.count()).select_from(RosterAllocation).where(RosterAllocation.roster_id == r.id, RosterAllocation.employee_id.in_(pod_emp_ids))) or 0
+            conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == r.id, RosterConflict.employee_id.in_(pod_emp_ids))).all()
+        else:
+            shifts_count = db.scalar(select(func.count()).select_from(EmployeeShift).where(EmployeeShift.roster_id == r.id)) or 0
+            allocs_count = db.scalar(select(func.count()).select_from(RosterAllocation).where(RosterAllocation.roster_id == r.id)) or 0
+            conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == r.id)).all()
         results.append(
             RosterSummaryResponse(
                 id=r.id,
@@ -435,15 +448,24 @@ def list_rosters(
 def get_roster(
     roster_id: uuid.UUID,
     db: Session = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_lead_or_manager),
 ) -> RosterSummaryResponse:
     r = db.get(Roster, roster_id)
     if not r:
         raise HTTPException(status_code=404, detail="Roster not found")
 
-    shifts_count = db.scalar(select(func.count()).select_from(EmployeeShift).where(EmployeeShift.roster_id == r.id)) or 0
-    allocs_count = db.scalar(select(func.count()).select_from(RosterAllocation).where(RosterAllocation.roster_id == r.id)) or 0
-    conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == r.id)).all()
+    pod_emp_ids: set[uuid.UUID] = set()
+    if _user.role == UserRole.POD_LEAD and _user.pod_id:
+        pod_emp_ids = set(db.scalars(select(Employee.id).where(Employee.pod_id == _user.pod_id)).all())
+
+    if _user.role == UserRole.POD_LEAD and pod_emp_ids:
+        shifts_count = db.scalar(select(func.count()).select_from(EmployeeShift).where(EmployeeShift.roster_id == r.id, EmployeeShift.employee_id.in_(pod_emp_ids))) or 0
+        allocs_count = db.scalar(select(func.count()).select_from(RosterAllocation).where(RosterAllocation.roster_id == r.id, RosterAllocation.employee_id.in_(pod_emp_ids))) or 0
+        conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == r.id, RosterConflict.employee_id.in_(pod_emp_ids))).all()
+    else:
+        shifts_count = db.scalar(select(func.count()).select_from(EmployeeShift).where(EmployeeShift.roster_id == r.id)) or 0
+        allocs_count = db.scalar(select(func.count()).select_from(RosterAllocation).where(RosterAllocation.roster_id == r.id)) or 0
+        conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == r.id)).all()
     return RosterSummaryResponse(
         id=r.id,
         name=r.name,
@@ -611,7 +633,7 @@ def get_roster_grid(
     view_type: str = Query("company", pattern="^(company|pod|brand|process|employee)$"),
     filter_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_lead_or_manager),
 ) -> RosterGridViewResponse:
     roster = db.get(Roster, roster_id)
     if not roster:
@@ -645,9 +667,19 @@ def get_roster_grid(
     # 4. 'process': Rows are BrandProcesses grouped by Process
     rows: list[GridRow] = []
 
+    if _user.role == UserRole.POD_LEAD and _user.pod_id:
+        # Pod Lead is strictly restricted to viewing employees and conflicts within their own pod
+        pod_emp_ids = {e.id for e in employees.values() if e.pod_id == _user.pod_id}
+        conflicts = [c for c in conflicts if c.employee_id in pod_emp_ids]
+        shifts = [s for s in shifts if s.employee_id in pod_emp_ids]
+        allocs = [a for a in allocs if a.employee_id in pod_emp_ids]
+        filter_id = _user.pod_id
+
     if view_type in ("company", "employee", "pod"):
         target_employees = list(employees.values())
-        if view_type == "pod" and filter_id:
+        if _user.role == UserRole.POD_LEAD and _user.pod_id:
+            target_employees = [e for e in target_employees if e.pod_id == _user.pod_id]
+        elif view_type == "pod" and filter_id:
             target_employees = [e for e in target_employees if e.pod_id == filter_id]
         elif view_type == "employee" and filter_id:
             target_employees = [e for e in target_employees if e.id == filter_id]
@@ -846,6 +878,417 @@ def get_roster_grid(
     )
 
 
+class GoogleSheetsExportRequest(BaseModel):
+    view_type: str = Field(default="company", pattern="^(company|pod|brand|process|employee)$")
+    filter_id: uuid.UUID | None = None
+    google_access_token: str | None = None
+
+
+class GoogleSheetsExportResponse(BaseModel):
+    spreadsheet_id: str
+    spreadsheet_url: str
+    title: str
+    rows_exported: int
+
+
+def extract_roster_export_dataset(
+    roster_id: uuid.UUID,
+    view_type: str,
+    filter_id: uuid.UUID | None,
+    db: Session,
+    _user: User,
+) -> tuple[Roster, list[str], list[dict[str, str]]]:
+    """Extracts and formats roster data rows while strictly enforcing RBAC and tenant scoping."""
+    roster = db.get(Roster, roster_id)
+    if not roster:
+        raise HTTPException(status_code=404, detail="Roster not found")
+
+    num_days = calendar.monthrange(roster.year, roster.month)[1]
+    dates = [f"{roster.year:04d}-{roster.month:02d}-{d:02d}" for d in range(1, num_days + 1)]
+
+    shifts = db.scalars(select(EmployeeShift).where(EmployeeShift.roster_id == roster.id)).all()
+    allocs = db.scalars(
+        select(RosterAllocation)
+        .options(selectinload(RosterAllocation.shift))
+        .where(RosterAllocation.roster_id == roster.id)
+    ).all()
+
+    employees = {e.id: e for e in db.scalars(select(Employee)).all()}
+    pods = {p.id: p for p in db.scalars(select(Pod)).all()}
+    bps = {bp.id: bp for bp in db.scalars(select(BrandProcess)).all()}
+    brands = {b.id: b for b in db.scalars(select(Brand)).all()}
+    processes = {pr.id: pr for pr in db.scalars(select(Process)).all()}
+
+    # RBAC & Tenant Scoping
+    if _user.role == UserRole.POD_LEAD:
+        if not _user.pod_id:
+            raise AppError("FORBIDDEN", "Pod Lead has no assigned pod.", 403)
+        if view_type in ("company", "brand", "process"):
+            raise AppError("FORBIDDEN", "Pod Leads can only export their authorized pod.", 403)
+        if view_type == "pod":
+            if filter_id and filter_id != _user.pod_id:
+                raise AppError("FORBIDDEN", "Pod Leads can only export their authorized pod.", 403)
+            filter_id = _user.pod_id
+        elif view_type == "employee":
+            if filter_id:
+                target_emp = employees.get(filter_id)
+                if not target_emp or target_emp.pod_id != _user.pod_id:
+                    raise AppError("FORBIDDEN", "Pod Leads can only export employees in their authorized pod.", 403)
+            else:
+                view_type = "pod"
+                filter_id = _user.pod_id
+
+    elif _user.role == UserRole.BRAND_USER:
+        if not _user.brand_id:
+            raise AppError("FORBIDDEN", "Brand User has no assigned brand.", 403)
+        if view_type != "brand":
+            raise AppError("FORBIDDEN", "Brand users can only export their own brand.", 403)
+        if filter_id and filter_id != _user.brand_id:
+            raise AppError("FORBIDDEN", "Brand users can only export their own brand.", 403)
+        filter_id = _user.brand_id
+
+    elif _user.role == UserRole.EMPLOYEE:
+        if not _user.employee_id:
+            raise AppError("FORBIDDEN", "Employee user has no linked employee record.", 403)
+        if view_type != "employee":
+            raise AppError("FORBIDDEN", "Employees can only export their own assignments.", 403)
+        if filter_id and filter_id != _user.employee_id:
+            raise AppError("FORBIDDEN", "Employees can only export their own assignments.", 403)
+        filter_id = _user.employee_id
+
+    elif _user.role in (UserRole.ADMIN, UserRole.OPERATIONS_MANAGER):
+        pass
+    else:
+        raise AppError("FORBIDDEN", "You do not have permission to export rosters.", 403)
+
+    fieldnames = [
+        "Date",
+        "Day of Week",
+        "Pod",
+        "Employee Code",
+        "Employee Name",
+        "Brand",
+        "Process",
+        "Shift Start",
+        "Shift End",
+        "Allocation Start",
+        "Allocation End",
+        "Allocation Status",
+        "Cross-Pod Approved",
+        "Reassigned From",
+    ]
+
+    rows_data: list[dict[str, str]] = []
+
+    if view_type in ("company", "pod", "employee"):
+        target_employees = list(employees.values())
+        if view_type == "pod" and filter_id:
+            target_employees = [e for e in target_employees if e.pod_id == filter_id]
+        elif view_type == "employee" and filter_id:
+            target_employees = [e for e in target_employees if e.id == filter_id]
+
+        target_employees.sort(key=lambda e: (str(e.pod_id or ""), e.name))
+
+        emp_shifts_map = {(s.employee_id, s.date.isoformat()): s for s in shifts}
+        emp_allocs_map: dict[tuple[uuid.UUID, str], list[RosterAllocation]] = {}
+        for a in allocs:
+            emp_allocs_map.setdefault((a.employee_id, a.date.isoformat()), []).append(a)
+
+        for emp in target_employees:
+            pod = pods.get(emp.pod_id)
+            pod_name = pod.name if pod else "Unassigned Pod"
+
+            for d_str in dates:
+                d_obj = date.fromisoformat(d_str)
+                day_name = d_obj.strftime("%A")
+                shift = emp_shifts_map.get((emp.id, d_str))
+                d_allocs = emp_allocs_map.get((emp.id, d_str), [])
+
+                shift_start = shift.start_time.strftime("%H:%M") if shift and shift.start_time else "-"
+                shift_end = shift.end_time.strftime("%H:%M") if shift and shift.end_time else "-"
+
+                if d_allocs:
+                    for a in d_allocs:
+                        bp = bps.get(a.brand_process_id)
+                        b_name = brands[bp.brand_id].name if bp and bp.brand_id in brands else "Unknown Brand"
+                        p_name = processes[bp.process_id].name if bp and bp.process_id in processes else "Unknown Process"
+                        reassigned_from_name = (
+                            employees[a.reassigned_from_employee_id].name
+                            if a.reassigned_from_employee_id and a.reassigned_from_employee_id in employees
+                            else "-"
+                        )
+                        rows_data.append({
+                            "Date": d_str,
+                            "Day of Week": day_name,
+                            "Pod": pod_name,
+                            "Employee Code": emp.employee_code,
+                            "Employee Name": emp.name,
+                            "Brand": b_name,
+                            "Process": p_name,
+                            "Shift Start": shift_start,
+                            "Shift End": shift_end,
+                            "Allocation Start": a.start_time.strftime("%H:%M"),
+                            "Allocation End": a.end_time.strftime("%H:%M"),
+                            "Allocation Status": a.allocation_type.value if hasattr(a.allocation_type, "value") else str(a.allocation_type),
+                            "Cross-Pod Approved": "Yes" if a.is_cross_pod_approved else "No",
+                            "Reassigned From": reassigned_from_name,
+                        })
+                else:
+                    alloc_status = "WEEKLY_OFF"
+                    if shift and shift.is_working_day:
+                        alloc_status = "UNALLOCATED_WORKING_DAY"
+                    rows_data.append({
+                        "Date": d_str,
+                        "Day of Week": day_name,
+                        "Pod": pod_name,
+                        "Employee Code": emp.employee_code,
+                        "Employee Name": emp.name,
+                        "Brand": "-",
+                        "Process": "-",
+                        "Shift Start": shift_start if shift and shift.is_working_day else "-",
+                        "Shift End": shift_end if shift and shift.is_working_day else "-",
+                        "Allocation Start": "-",
+                        "Allocation End": "-",
+                        "Allocation Status": alloc_status,
+                        "Cross-Pod Approved": "No",
+                        "Reassigned From": "-",
+                    })
+
+    elif view_type == "brand":
+        target_bps = list(bps.values())
+        if filter_id:
+            target_bps = [bp for bp in target_bps if bp.brand_id == filter_id]
+
+        target_bps.sort(key=lambda bp: (str(bp.brand_id), str(bp.process_id)))
+
+        bp_allocs_map: dict[tuple[uuid.UUID, str], list[RosterAllocation]] = {}
+        for a in allocs:
+            bp_allocs_map.setdefault((a.brand_process_id, a.date.isoformat()), []).append(a)
+
+        for bp in target_bps:
+            b_name = brands[bp.brand_id].name if bp.brand_id in brands else "Unknown Brand"
+            p_name = processes[bp.process_id].name if bp.process_id in processes else "Unknown Process"
+
+            for d_str in dates:
+                d_obj = date.fromisoformat(d_str)
+                day_name = d_obj.strftime("%A")
+                d_allocs = bp_allocs_map.get((bp.id, d_str), [])
+
+                if d_allocs:
+                    for a in d_allocs:
+                        emp = employees.get(a.employee_id)
+                        pod = pods.get(emp.pod_id) if emp and emp.pod_id else None
+                        pod_name = pod.name if pod else "-"
+                        emp_code = emp.employee_code if emp else "-"
+                        emp_name = emp.name if emp else "Unassigned"
+                        reassigned_from_name = (
+                            employees[a.reassigned_from_employee_id].name
+                            if a.reassigned_from_employee_id and a.reassigned_from_employee_id in employees
+                            else "-"
+                        )
+                        rows_data.append({
+                            "Date": d_str,
+                            "Day of Week": day_name,
+                            "Pod": pod_name,
+                            "Employee Code": emp_code,
+                            "Employee Name": emp_name,
+                            "Brand": b_name,
+                            "Process": p_name,
+                            "Shift Start": a.start_time.strftime("%H:%M"),
+                            "Shift End": a.end_time.strftime("%H:%M"),
+                            "Allocation Start": a.start_time.strftime("%H:%M"),
+                            "Allocation End": a.end_time.strftime("%H:%M"),
+                            "Allocation Status": a.allocation_type.value if hasattr(a.allocation_type, "value") else str(a.allocation_type),
+                            "Cross-Pod Approved": "Yes" if a.is_cross_pod_approved else "No",
+                            "Reassigned From": reassigned_from_name,
+                        })
+                else:
+                    rows_data.append({
+                        "Date": d_str,
+                        "Day of Week": day_name,
+                        "Pod": "-",
+                        "Employee Code": "-",
+                        "Employee Name": "-",
+                        "Brand": b_name,
+                        "Process": p_name,
+                        "Shift Start": "-",
+                        "Shift End": "-",
+                        "Allocation Start": "-",
+                        "Allocation End": "-",
+                        "Allocation Status": "CLOSED_OR_UNALLOCATED",
+                        "Cross-Pod Approved": "No",
+                        "Reassigned From": "-",
+                    })
+
+    elif view_type == "process":
+        target_bps = list(bps.values())
+        if filter_id:
+            target_bps = [bp for bp in target_bps if bp.process_id == filter_id]
+
+        target_bps.sort(key=lambda bp: (str(bp.process_id), str(bp.brand_id)))
+
+        bp_allocs_map = {}
+        for a in allocs:
+            bp_allocs_map.setdefault((a.brand_process_id, a.date.isoformat()), []).append(a)
+
+        for bp in target_bps:
+            b_name = brands[bp.brand_id].name if bp.brand_id in brands else "Unknown Brand"
+            p_name = processes[bp.process_id].name if bp.process_id in processes else "Unknown Process"
+
+            for d_str in dates:
+                d_obj = date.fromisoformat(d_str)
+                day_name = d_obj.strftime("%A")
+                d_allocs = bp_allocs_map.get((bp.id, d_str), [])
+
+                if d_allocs:
+                    for a in d_allocs:
+                        emp = employees.get(a.employee_id)
+                        pod = pods.get(emp.pod_id) if emp and emp.pod_id else None
+                        pod_name = pod.name if pod else "-"
+                        emp_code = emp.employee_code if emp else "-"
+                        emp_name = emp.name if emp else "Unassigned"
+                        reassigned_from_name = (
+                            employees[a.reassigned_from_employee_id].name
+                            if a.reassigned_from_employee_id and a.reassigned_from_employee_id in employees
+                            else "-"
+                        )
+                        rows_data.append({
+                            "Date": d_str,
+                            "Day of Week": day_name,
+                            "Pod": pod_name,
+                            "Employee Code": emp_code,
+                            "Employee Name": emp_name,
+                            "Brand": b_name,
+                            "Process": p_name,
+                            "Shift Start": a.start_time.strftime("%H:%M"),
+                            "Shift End": a.end_time.strftime("%H:%M"),
+                            "Allocation Start": a.start_time.strftime("%H:%M"),
+                            "Allocation End": a.end_time.strftime("%H:%M"),
+                            "Allocation Status": a.allocation_type.value if hasattr(a.allocation_type, "value") else str(a.allocation_type),
+                            "Cross-Pod Approved": "Yes" if a.is_cross_pod_approved else "No",
+                            "Reassigned From": reassigned_from_name,
+                        })
+                else:
+                    rows_data.append({
+                        "Date": d_str,
+                        "Day of Week": day_name,
+                        "Pod": "-",
+                        "Employee Code": "-",
+                        "Employee Name": "-",
+                        "Brand": b_name,
+                        "Process": p_name,
+                        "Shift Start": "-",
+                        "Shift End": "-",
+                        "Allocation Start": "-",
+                        "Allocation End": "-",
+                        "Allocation Status": "CLOSED_OR_UNALLOCATED",
+                        "Cross-Pod Approved": "No",
+                        "Reassigned From": "-",
+                    })
+
+    return roster, fieldnames, rows_data
+
+
+@router.get("/export/google-sheets/status")
+def google_sheets_status(
+    _user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Returns whether Google Sheets export is currently configured and operational."""
+    from app.modules.roster.sheets_service import get_google_sheets_status
+    return get_google_sheets_status()
+
+
+@router.post("/{roster_id}/export/google-sheets", response_model=GoogleSheetsExportResponse)
+def export_roster_google_sheets(
+    roster_id: uuid.UUID,
+    payload: GoogleSheetsExportRequest,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> GoogleSheetsExportResponse:
+    """Exports a specific roster and version to a new Google Spreadsheet using official Sheets API."""
+    from app.modules.roster.sheets_service import (
+        resolve_google_credentials,
+        create_and_format_roster_sheet,
+    )
+
+    roster, fieldnames, rows_data = extract_roster_export_dataset(
+        roster_id=roster_id,
+        view_type=payload.view_type,
+        filter_id=payload.filter_id,
+        db=db,
+        _user=_user,
+    )
+
+    credentials = resolve_google_credentials(payload.google_access_token)
+    spreadsheet_title = f"{roster.name} - {payload.view_type.capitalize()} View (v{roster.version})"
+
+    result = create_and_format_roster_sheet(
+        credentials=credentials,
+        spreadsheet_title=spreadsheet_title,
+        fieldnames=fieldnames,
+        rows_data=rows_data,
+    )
+
+    return GoogleSheetsExportResponse(**result)
+
+
+def sanitize_csv_cell(value: Any) -> str:
+    """Sanitizes cell values to prevent CSV formula injection (OWASP CSV Injection defense).
+
+    If the string begins with '=', '+', '-', '@', tab (0x09), or carriage return (0x0D),
+    prepends a single quote (') so spreadsheet applications interpret it strictly as plain text.
+    Preserves valid CSV escaping, Unicode characters, and converts non-string types.
+    """
+    if value is None:
+        return ""
+    val_str = str(value)
+    if val_str and val_str[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{val_str}"
+    return val_str
+
+
+def serialize_dataset_to_csv(fieldnames: list[str], rows_data: list[dict[str, Any]]) -> bytes:
+    """Serializes dataset rows to RFC 4180 CSV with UTF-8 BOM and formula injection protection."""
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\r\n")
+    writer.writeheader()
+    for row in rows_data:
+        sanitized_row = {k: sanitize_csv_cell(row.get(k, "")) for k in fieldnames}
+        writer.writerow(sanitized_row)
+
+    csv_content = output.getvalue()
+    return csv_content.encode("utf-8-sig")
+
+
+@router.get("/{roster_id}/export/csv")
+def export_roster_csv(
+    roster_id: uuid.UUID,
+    view_type: str = Query("company", pattern="^(company|pod|brand|process|employee)$"),
+    filter_id: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> Response:
+    """Exports a specific roster and version to downloadable CSV, respecting view type and strict role scoping."""
+    roster, fieldnames, rows_data = extract_roster_export_dataset(
+        roster_id=roster_id,
+        view_type=view_type,
+        filter_id=filter_id,
+        db=db,
+        _user=_user,
+    )
+
+    csv_bytes = serialize_dataset_to_csv(fieldnames=fieldnames, rows_data=rows_data)
+
+    safe_name = re.sub(r"[^\w\-_]", "_", roster.name)
+    filename = f"roster_{safe_name}_{view_type}_v{roster.version}.csv"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": "text/csv; charset=utf-8",
+    }
+    return Response(content=csv_bytes, media_type="text/csv", headers=headers)
+
+
 # ---------------------------------------------------------------------
 # Reassignment Preview & Transactional Apply Endpoints
 # ---------------------------------------------------------------------
@@ -855,7 +1298,7 @@ def preview_reassignment(
     roster_id: uuid.UUID,
     payload: ReassignPreviewRequest,
     db: Session = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_lead_or_manager),
 ) -> ReassignPreviewResponse:
     roster = db.get(Roster, roster_id)
     if not roster:
@@ -872,6 +1315,17 @@ def preview_reassignment(
             requires_ops_manager_approval=False,
             affected_conflicts_count=0,
         )
+
+    # Scoping for Pod Lead: can only reassign to employees within their own pod
+    if _user.role == UserRole.POD_LEAD and _user.pod_id:
+        if target_emp.pod_id != _user.pod_id:
+            return ReassignPreviewResponse(
+                is_eligible=False,
+                rejection_reason="Pod leads can only reassign to employees within their own pod",
+                allocation_type=AllocationType.PRIMARY,
+                requires_ops_manager_approval=False,
+                affected_conflicts_count=0,
+            )
 
     bp = db.get(BrandProcess, payload.brand_process_id)
     if not bp:
@@ -969,13 +1423,22 @@ def apply_reassignment(
     roster_id: uuid.UUID,
     payload: ReassignApplyRequest,
     db: Session = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_lead_or_manager),
 ):
     roster = db.get(Roster, roster_id)
     if not roster:
         raise HTTPException(status_code=404, detail="Roster not found")
     if roster.status == RosterStatus.PUBLISHED:
         raise HTTPException(status_code=400, detail="Cannot modify an immutable published roster")
+
+    target_emp = db.get(Employee, payload.target_employee_id)
+    if not target_emp or target_emp.status != EmployeeStatus.ACTIVE:
+        raise HTTPException(status_code=404, detail="Target employee not found or inactive")
+
+    # Scoping for Pod Lead: can only reassign to employees within their own pod
+    if _user.role == UserRole.POD_LEAD and _user.pod_id:
+        if target_emp.pod_id != _user.pod_id:
+            raise HTTPException(status_code=403, detail="Pod leads can only reassign to employees within their own pod")
 
     preview = preview_reassignment(
         roster_id=roster_id,
@@ -1078,7 +1541,7 @@ def get_backup_candidates(
     start_time: time,
     end_time: time,
     db: Session = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_lead_or_manager),
 ) -> list[BackupCandidateResponse]:
     bp = db.get(BrandProcess, brand_process_id)
     if not bp:
@@ -1103,6 +1566,9 @@ def get_backup_candidates(
             EmployeeProcessSkill.is_active == True,
         )
     ).all()
+
+    if _user.role == UserRole.POD_LEAD and _user.pod_id:
+        candidates = [c for c in candidates if c.pod_id == _user.pod_id]
 
     pods = {p.id: p.name for p in db.scalars(select(Pod)).all()}
     prefs = {p.employee_id: p for p in db.scalars(select(EmployeePreference)).all()}
@@ -1162,7 +1628,7 @@ def get_allocation_log(
     roster_id: uuid.UUID,
     dynamic_only: bool = Query(default=False, description="Filter for dynamic reassignments only"),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_lead_or_manager),
 ) -> list[AllocationLogItem]:
     roster = db.get(Roster, roster_id)
     if not roster:
@@ -1182,6 +1648,11 @@ def get_allocation_log(
 
     # Preload entities for lookup
     employees = {e.id: e for e in db.scalars(select(Employee)).all()}
+    if _user.role == UserRole.POD_LEAD and _user.pod_id:
+        allocations = [
+            a for a in allocations
+            if employees.get(a.employee_id) and employees[a.employee_id].pod_id == _user.pod_id
+        ]
     pods = {p.id: p.name for p in db.scalars(select(Pod)).all()}
     bps = {bp.id: bp for bp in db.scalars(select(BrandProcess)).all()}
     brands = {b.id: b.name for b in db.scalars(select(Brand)).all()}
@@ -1238,7 +1709,7 @@ def get_allocation_log(
 def get_roster_analytics(
     roster_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_lead_or_manager),
 ) -> WorkforceAnalyticsResponse:
     """Calculates workforce utilization, capacity distribution, and staffing deficit/surplus per pod."""
     import math
@@ -1253,6 +1724,20 @@ def get_roster_analytics(
     conflicts = db.scalars(
         select(RosterConflict).where(RosterConflict.roster_id == roster.id)
     ).all()
+
+    active_employees = db.scalars(
+        select(Employee).where(Employee.status == EmployeeStatus.ACTIVE)
+    ).all()
+    emp_by_id = {e.id: e for e in active_employees}
+    pods = list(db.scalars(select(Pod)).all())
+
+    # Scoping for Pod Lead: restrict metrics, employees, allocations, and pods to their pod only
+    if current_user.role == UserRole.POD_LEAD and current_user.pod_id:
+        pod_emp_ids = {e.id for e in active_employees if e.pod_id == current_user.pod_id}
+        allocations = [a for a in allocations if a.employee_id in pod_emp_ids]
+        conflicts = [c for c in conflicts if c.employee_id in pod_emp_ids]
+        active_employees = [e for e in active_employees if e.pod_id == current_user.pod_id]
+        pods = [p for p in pods if p.id == current_user.pod_id]
 
     uncovered_conflicts = [c for c in conflicts if c.conflict_type == ConflictType.UNCOVERED_SLOT]
     hard_conflicts = [c for c in conflicts if c.severity == ConflictSeverity.HARD_VIOLATION]
@@ -1270,12 +1755,6 @@ def get_roster_analytics(
     uncovered_hours = len(uncovered_conflicts) * 9.0
     total_demand_hours = scheduled_hours + uncovered_hours
     demand_coverage_pct = round((scheduled_allocations / total_demand_slots * 100.0), 1) if total_demand_slots > 0 else 100.0
-
-    active_employees = db.scalars(
-        select(Employee).where(Employee.status == EmployeeStatus.ACTIVE)
-    ).all()
-    emp_by_id = {e.id: e for e in active_employees}
-    pods = db.scalars(select(Pod)).all()
     skills = db.scalars(select(EmployeeProcessSkill)).all()
     processes = {p.id: p.name for p in db.scalars(select(Process)).all()}
 
@@ -1551,7 +2030,7 @@ def _load_solver_inputs(roster: Roster, db: Session):
 def preview_conflict_resolutions(
     roster_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_lead_or_manager),
 ) -> ResolverPreviewResponse:
     """Runs AutomatedConflictResolver in preview mode without committing changes."""
     roster = db.get(Roster, roster_id)
@@ -1633,6 +2112,17 @@ def preview_conflict_resolutions(
         else:
             auto_bundles.append(formatted)
 
+    if current_user.role == UserRole.POD_LEAD and current_user.pod_id:
+        pod_emp_ids = set(str(eid) for eid in db.scalars(select(Employee.id).where(Employee.pod_id == current_user.pod_id)).all())
+        auto_bundles = [
+            b for b in auto_bundles
+            if any((ch.get("previous_employee_id") in pod_emp_ids) or (ch.get("new_employee_id") in pod_emp_ids) for ch in b.changes)
+        ]
+        approval_bundles = [
+            b for b in approval_bundles
+            if any((ch.get("previous_employee_id") in pod_emp_ids) or (ch.get("new_employee_id") in pod_emp_ids) for ch in b.changes)
+        ]
+
     shortages_data: list[ResolverShortageResponse] = []
     for s in result.shortage_evidences:
         bp = bp_by_id.get(s.brand_process_id)
@@ -1705,7 +2195,7 @@ def apply_conflict_resolutions(
     roster_id: uuid.UUID,
     payload: ResolverApplyRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_lead_or_manager),
 ) -> ResolverApplyResponse:
     """Applies conflict resolutions transactionally, creating a child revision if the roster is published."""
     roster = db.get(Roster, roster_id)

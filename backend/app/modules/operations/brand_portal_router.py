@@ -6,7 +6,8 @@ from datetime import datetime, timezone, time, date
 import calendar
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
@@ -409,9 +410,94 @@ def approve_brand_request(
             if "min_staffing" in req_cfg:
                 ov.override_min_staffing = int(req_cfg["min_staffing"])
 
-    # 2. Mark affected draft rosters as STALE
+    # 2. Mark affected draft rosters as STALE and recompute conflicts on draft rosters
     new_hash = compute_config_hash(db)
     check_and_mark_stale_rosters(db, new_hash)
+    from app.modules.roster.recompute import recompute_roster_conflicts_sync
+    from app.modules.roster.models import EmployeeShift
+    # Recompute on active draft or fork child if published
+    target_roster = None
+    if payload and hasattr(payload, "roster_id") and payload.roster_id:
+        target_roster = db.get(Roster, payload.roster_id)
+    if not target_roster:
+        target_roster = db.scalar(
+            select(Roster)
+            .where(Roster.status == RosterStatus.PUBLISHED)
+            .order_by(Roster.version.desc())
+        )
+    if not target_roster:
+        target_roster = db.scalar(
+            select(Roster).order_by(Roster.version.desc(), Roster.created_at.desc())
+        )
+    if target_roster:
+        if target_roster.status == RosterStatus.PUBLISHED:
+            max_v = max(
+                r.version
+                for r in db.scalars(
+                    select(Roster).where(
+                        Roster.month == target_roster.month, Roster.year == target_roster.year
+                    )
+                ).all()
+            )
+            child = Roster(
+                id=uuid.uuid4(),
+                name=f"{target_roster.name} (v{max_v + 1})",
+                month=target_roster.month,
+                year=target_roster.year,
+                version=max_v + 1,
+                parent_roster_id=target_roster.id,
+                status=RosterStatus.DRAFT,
+                config_hash=new_hash,
+                created_by=user.email,
+            )
+            db.add(child)
+            db.flush()
+
+            parent_shifts = db.scalars(
+                select(EmployeeShift).where(EmployeeShift.roster_id == target_roster.id)
+            ).all()
+            shift_map: dict[uuid.UUID, uuid.UUID] = {}
+            for s in parent_shifts:
+                new_s = EmployeeShift(
+                    id=uuid.uuid4(),
+                    roster_id=child.id,
+                    employee_id=s.employee_id,
+                    date=s.date,
+                    start_time=s.start_time,
+                    end_time=s.end_time,
+                    is_working_day=s.is_working_day,
+                )
+                db.add(new_s)
+                shift_map[s.id] = new_s.id
+            db.flush()
+
+            parent_allocs = db.scalars(
+                select(RosterAllocation).where(RosterAllocation.roster_id == target_roster.id)
+            ).all()
+            for a in parent_allocs:
+                new_sid = shift_map.get(a.shift_id)
+                if not new_sid:
+                    continue
+                new_a = RosterAllocation(
+                    id=uuid.uuid4(),
+                    roster_id=child.id,
+                    shift_id=new_sid,
+                    employee_id=a.employee_id,
+                    brand_process_id=a.brand_process_id,
+                    date=a.date,
+                    start_time=a.start_time,
+                    end_time=a.end_time,
+                    allocation_type=a.allocation_type,
+                    reassigned_from_employee_id=a.reassigned_from_employee_id,
+                    is_cross_pod_approved=a.is_cross_pod_approved,
+                    reassignment_reason=a.reassignment_reason,
+                )
+                db.add(new_a)
+            db.flush()
+            target_roster = child
+
+        recompute_roster_conflicts_sync(db, target_roster.id)
+        req.implemented_roster_id = target_roster.id
 
     # 3. Transition status to ROSTER_PENDING
     req.status = RequestStatus.ROSTER_PENDING.value
@@ -481,6 +567,7 @@ def reject_brand_request(
     return res
 
 
+
 @router.post("/requests/{request_id}/mark-implemented", response_model=BrandChangeRequestRead)
 def mark_request_implemented(
     request_id: UUID,
@@ -493,20 +580,29 @@ def mark_request_implemented(
     if not req:
         raise AppError("NOT_FOUND", "Request not found.", 404)
 
-    if roster_id:
-        roster = db.get(Roster, roster_id)
-        if not roster or roster.status != RosterStatus.PUBLISHED:
-            raise AppError("BAD_REQUEST", "Target roster must be PUBLISHED to mark request implemented.", 400)
-        req.implemented_roster_id = roster.id
+    # State integrity
+    if req.status == RequestStatus.IMPLEMENTED.value:
+        raise AppError("CONFLICT", "Request is already marked as IMPLEMENTED.", 409)
+    if req.status == RequestStatus.REJECTED.value:
+        raise AppError("CONFLICT", "Cannot mark a rejected request as implemented.", 409)
+    if req.status == RequestStatus.PENDING.value:
+        raise AppError("CONFLICT", "Cannot mark a pending request as implemented. Request must be reviewed and approved first.", 409)
 
-    brand = db.get(Brand, req.brand_id)
-    req.status = RequestStatus.IMPLEMENTED.value
     roster = None
     if roster_id:
         roster = db.get(Roster, roster_id)
-        if not roster or roster.status != RosterStatus.PUBLISHED:
-            raise AppError("BAD_REQUEST", "Target roster must be PUBLISHED to mark request implemented.", 400)
-        req.implemented_roster_id = roster.id
+    elif req.implemented_roster_id:
+        roster = db.get(Roster, req.implemented_roster_id)
+
+    if not roster:
+        raise AppError("BAD_REQUEST", "No associated roster found to verify implementation.", 400)
+
+    if roster.status != RosterStatus.PUBLISHED:
+        raise AppError("BAD_REQUEST", f"Target roster must be PUBLISHED to mark request implemented (current status: {roster.status.value}).", 400)
+
+    brand = db.get(Brand, req.brand_id)
+    req.status = RequestStatus.IMPLEMENTED.value
+    req.implemented_roster_id = roster.id
     db.flush()
 
     message = (
@@ -531,3 +627,66 @@ def mark_request_implemented(
     if brand:
         res.brand_name = brand.name
     return res
+
+
+@router.get("/export/csv")
+def export_brand_schedule_csv(
+    roster_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_brand_user),
+) -> Response:
+    """Exports the authenticated brand's schedule to CSV for a specified or latest active roster."""
+    if not user.brand_id:
+        raise AppError("FORBIDDEN", "User has no associated brand.", 403)
+
+    if not roster_id:
+        roster = db.scalars(
+            select(Roster)
+            .where(Roster.status == RosterStatus.PUBLISHED)
+            .order_by(Roster.year.desc(), Roster.month.desc(), Roster.version.desc())
+        ).first()
+        if not roster:
+            roster = db.scalars(select(Roster).order_by(Roster.created_at.desc())).first()
+        if not roster:
+            raise HTTPException(status_code=404, detail="No active roster found to export")
+        roster_id = roster.id
+
+    from app.modules.roster.router import export_roster_csv
+    return export_roster_csv(roster_id=roster_id, view_type="brand", filter_id=user.brand_id, db=db, _user=user)
+
+
+class BrandGoogleSheetsExportRequest(BaseModel):
+    roster_id: UUID | None = None
+    google_access_token: str | None = None
+
+
+@router.post("/export/google-sheets")
+def export_brand_schedule_google_sheets(
+    payload: BrandGoogleSheetsExportRequest = BrandGoogleSheetsExportRequest(),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_brand_user),
+) -> dict:
+    """Exports the authenticated brand's schedule directly to a new Google Spreadsheet."""
+    if not user.brand_id:
+        raise AppError("FORBIDDEN", "User has no associated brand.", 403)
+
+    target_roster_id = payload.roster_id
+    if not target_roster_id:
+        roster = db.scalars(
+            select(Roster)
+            .where(Roster.status == RosterStatus.PUBLISHED)
+            .order_by(Roster.year.desc(), Roster.month.desc(), Roster.version.desc())
+        ).first()
+        if not roster:
+            roster = db.scalars(select(Roster).order_by(Roster.created_at.desc())).first()
+        if not roster:
+            raise HTTPException(status_code=404, detail="No active roster found to export")
+        target_roster_id = roster.id
+
+    from app.modules.roster.router import export_roster_google_sheets, GoogleSheetsExportRequest
+    sheets_payload = GoogleSheetsExportRequest(
+        view_type="brand", filter_id=user.brand_id, google_access_token=payload.google_access_token
+    )
+    res = export_roster_google_sheets(roster_id=target_roster_id, payload=sheets_payload, db=db, _user=user)
+    return res.model_dump()
+

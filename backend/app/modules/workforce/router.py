@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import AppError
 from app.db.session import get_db
-from app.modules.auth.dependencies import require_manager, verify_csrf
+from app.modules.auth.dependencies import require_lead_or_manager, require_manager, verify_csrf
+from app.modules.auth.models import User, UserRole
 from app.modules.operations.models import Process
 from app.modules.workforce.models import (
     Employee,
@@ -29,8 +30,8 @@ from app.modules.workforce.schemas import (
     SkillSet,
 )
 
-router = APIRouter(tags=["workforce"], dependencies=[Depends(require_manager)])
-mutation_dependencies = [Depends(verify_csrf)]
+router = APIRouter(tags=["workforce"], dependencies=[Depends(require_lead_or_manager)])
+mutation_dependencies = [Depends(require_manager), Depends(verify_csrf)]
 
 
 def require_employee(db: Session, employee_id: UUID) -> Employee:
@@ -38,6 +39,12 @@ def require_employee(db: Session, employee_id: UUID) -> Employee:
     if employee is None:
         raise AppError("EMPLOYEE_NOT_FOUND", "Employee was not found.", 404)
     return employee
+
+
+def check_employee_pod_scope(user: User, employee: Employee) -> None:
+    if user.role == UserRole.POD_LEAD and user.pod_id:
+        if employee.pod_id != user.pod_id:
+            raise AppError("FORBIDDEN", "You do not have permission to view employees from other pods.", 403)
 
 
 def require_pod(db: Session, pod_id: UUID) -> Pod:
@@ -144,9 +151,12 @@ def list_employees(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_lead_or_manager),
 ) -> list[Employee]:
     statement = select(Employee).order_by(Employee.employee_code).offset(offset).limit(limit)
-    if pod_id is not None:
+    if current_user.role == UserRole.POD_LEAD and current_user.pod_id:
+        statement = statement.where(Employee.pod_id == current_user.pod_id)
+    elif pod_id is not None:
         statement = statement.where(Employee.pod_id == pod_id)
     if employee_status is not None:
         statement = statement.where(Employee.status == employee_status)
@@ -167,8 +177,14 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db)) -> E
 
 
 @router.get("/employees/{employee_id}", response_model=EmployeeRead)
-def get_employee(employee_id: UUID, db: Session = Depends(get_db)) -> Employee:
-    return require_employee(db, employee_id)
+def get_employee(
+    employee_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_lead_or_manager),
+) -> Employee:
+    employee = require_employee(db, employee_id)
+    check_employee_pod_scope(current_user, employee)
+    return employee
 
 
 @router.patch("/employees/{employee_id}", response_model=EmployeeRead, dependencies=mutation_dependencies)
@@ -200,8 +216,13 @@ def deactivate_employee(employee_id: UUID, db: Session = Depends(get_db)) -> Non
 
 
 @router.get("/employees/{employee_id}/skills", response_model=list[SkillRead])
-def list_employee_skills(employee_id: UUID, db: Session = Depends(get_db)) -> list[EmployeeProcessSkill]:
-    require_employee(db, employee_id)
+def list_employee_skills(
+    employee_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_lead_or_manager),
+) -> list[EmployeeProcessSkill]:
+    employee = require_employee(db, employee_id)
+    check_employee_pod_scope(current_user, employee)
     return list(
         db.scalars(
             select(EmployeeProcessSkill)
@@ -312,9 +333,12 @@ def delete_employee_unavailability(
 
 @router.get("/employees/{employee_id}/preferences", response_model=EmployeePreferenceRead | None)
 def get_employee_preferences(
-    employee_id: UUID, db: Session = Depends(get_db)
+    employee_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_lead_or_manager),
 ) -> EmployeePreference | None:
-    require_record(db, Employee, employee_id, "EMPLOYEE_NOT_FOUND", "Employee")
+    employee = require_record(db, Employee, employee_id, "EMPLOYEE_NOT_FOUND", "Employee")
+    check_employee_pod_scope(current_user, employee)
     return db.scalar(
         select(EmployeePreference).where(EmployeePreference.employee_id == employee_id)
     )

@@ -17,6 +17,7 @@ import {
   ChevronRight,
   BarChart3,
 } from 'lucide-react';
+import { User } from '../../services/types';
 
 export type NavTab =
   | 'dashboard'
@@ -40,6 +41,7 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   conflictCount?: number;
   onOpenGenerateModal?: () => void;
+  currentUser?: User | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -49,53 +51,85 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   conflictCount = 0,
   onOpenGenerateModal,
+  currentUser,
 }) => {
-  const sections = [
-    {
-      group: 'OVERVIEW',
-      items: [
-        { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'analytics' as NavTab, label: 'Workforce Analytics', icon: BarChart3 },
-      ],
-    },
-    {
-      group: 'SCHEDULING',
-      items: [
-        { id: 'requests' as NavTab, label: 'Requests & Approvals', icon: FileText },
-        { id: 'roster' as NavTab, label: 'Roster Calendar', icon: Calendar },
+  const isPodLead = currentUser?.role === 'POD_LEAD';
+
+  const sections = isPodLead
+    ? [
         {
-          id: 'conflicts' as NavTab,
-          label: 'Conflicts & Coverage',
-          icon: ShieldAlert,
-          badge: conflictCount > 0 ? conflictCount : undefined,
-          badgeVariant: 'rose',
+          group: 'POD OVERVIEW',
+          items: [
+            { id: 'analytics' as NavTab, label: 'Pod Analytics', icon: BarChart3 },
+          ],
         },
-        { id: 'allocation-log' as NavTab, label: 'Dynamic Allocation Log', icon: ArrowRightLeft },
-      ],
-    },
-    {
-      group: 'WORKFORCE',
-      items: [
-        { id: 'employees' as NavTab, label: 'Employees', icon: Users },
-        { id: 'pods' as NavTab, label: 'Pods Directory', icon: Network },
-        { id: 'leaves' as NavTab, label: 'Availability & Leave', icon: CalendarOff },
-      ],
-    },
-    {
-      group: 'OPERATIONS',
-      items: [
-        { id: 'brands' as NavTab, label: 'Brands & Processes', icon: Briefcase },
-        { id: 'assignments' as NavTab, label: 'Primary Assignments', icon: GitFork },
-        { id: 'rules' as NavTab, label: 'Operating Rules', icon: Sliders },
-      ],
-    },
-    {
-      group: 'MANAGEMENT',
-      items: [
-        { id: 'history' as NavTab, label: 'Roster History & Versions', icon: History },
-      ],
-    },
-  ];
+        {
+          group: 'POD SCHEDULE',
+          items: [
+            { id: 'roster' as NavTab, label: 'Pod Calendar', icon: Calendar },
+            {
+              id: 'conflicts' as NavTab,
+              label: 'Pod Conflicts',
+              icon: ShieldAlert,
+              badge: conflictCount > 0 ? conflictCount : undefined,
+              badgeVariant: 'rose',
+            },
+          ],
+        },
+        {
+          group: 'POD WORKFORCE',
+          items: [
+            { id: 'employees' as NavTab, label: 'Pod Members', icon: Users },
+            { id: 'requests' as NavTab, label: 'Pod Absence Requests', icon: FileText },
+          ],
+        },
+      ]
+    : [
+        {
+          group: 'OVERVIEW',
+          items: [
+            { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
+            { id: 'analytics' as NavTab, label: 'Workforce Analytics', icon: BarChart3 },
+          ],
+        },
+        {
+          group: 'SCHEDULING',
+          items: [
+            { id: 'requests' as NavTab, label: 'Requests & Approvals', icon: FileText },
+            { id: 'roster' as NavTab, label: 'Roster Calendar', icon: Calendar },
+            {
+              id: 'conflicts' as NavTab,
+              label: 'Conflicts & Coverage',
+              icon: ShieldAlert,
+              badge: conflictCount > 0 ? conflictCount : undefined,
+              badgeVariant: 'rose',
+            },
+            { id: 'allocation-log' as NavTab, label: 'Dynamic Allocation Log', icon: ArrowRightLeft },
+          ],
+        },
+        {
+          group: 'WORKFORCE',
+          items: [
+            { id: 'employees' as NavTab, label: 'Employees', icon: Users },
+            { id: 'pods' as NavTab, label: 'Pods Directory', icon: Network },
+            { id: 'leaves' as NavTab, label: 'Availability & Leave', icon: CalendarOff },
+          ],
+        },
+        {
+          group: 'OPERATIONS',
+          items: [
+            { id: 'brands' as NavTab, label: 'Brands & Processes', icon: Briefcase },
+            { id: 'assignments' as NavTab, label: 'Primary Assignments', icon: GitFork },
+            { id: 'rules' as NavTab, label: 'Operating Rules', icon: Sliders },
+          ],
+        },
+        {
+          group: 'MANAGEMENT',
+          items: [
+            { id: 'history' as NavTab, label: 'Roster History & Versions', icon: History },
+          ],
+        },
+      ];
 
   return (
     <aside
@@ -131,7 +165,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Quick Action: Generate Roster */}
-      {!isCollapsed && onOpenGenerateModal && (
+      {!isCollapsed && !isPodLead && onOpenGenerateModal && (
         <div className="p-3 border-b border-slate-800/60">
           <button
             onClick={onOpenGenerateModal}

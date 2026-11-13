@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Search,
-  Bell,
   ShieldAlert,
   LogOut,
   Calendar,
@@ -9,8 +8,9 @@ import {
   ChevronDown,
   User as UserIcon,
 } from 'lucide-react';
-import { User, RosterSummary } from '../../services/types';
+import { User, RosterSummary, AppNotification } from '../../services/types';
 import { NavTab } from './Sidebar';
+import { NotificationBell } from '../notifications/NotificationBell';
 
 interface TopbarProps {
   activeTab: NavTab;
@@ -23,6 +23,12 @@ interface TopbarProps {
   onOpenConflicts: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  notifications?: AppNotification[];
+  unreadCount?: number;
+  isConnected?: boolean;
+  onMarkNotificationAsRead?: (id: string) => void;
+  onDeleteNotification?: (id: string) => void;
+  onNavigateToRequest?: (refType: string, refId: string) => void;
 }
 
 export const Topbar: React.FC<TopbarProps> = ({
@@ -36,6 +42,12 @@ export const Topbar: React.FC<TopbarProps> = ({
   onOpenConflicts,
   searchQuery,
   onSearchChange,
+  notifications = [],
+  unreadCount = 0,
+  isConnected = false,
+  onMarkNotificationAsRead = () => {},
+  onDeleteNotification,
+  onNavigateToRequest,
 }) => {
   const getTabBreadcrumb = (tab: NavTab) => {
     switch (tab) {
@@ -131,6 +143,16 @@ export const Topbar: React.FC<TopbarProps> = ({
           </button>
         )}
 
+        {/* Real-time Notification Center */}
+        <NotificationBell
+          notifications={notifications}
+          unreadCount={unreadCount}
+          isConnected={isConnected}
+          onMarkAsRead={onMarkNotificationAsRead}
+          onDelete={onDeleteNotification}
+          onNavigateToRequest={onNavigateToRequest}
+        />
+
         {/* User Profile */}
         <div className="flex items-center gap-3 pl-2 border-l border-slate-200">
           <div className="flex flex-col text-right hidden sm:flex">
@@ -139,7 +161,13 @@ export const Topbar: React.FC<TopbarProps> = ({
             </span>
             <div className="flex items-center justify-end gap-1 mt-0.5">
               <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-xs bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">
-                {currentUser?.role === 'ADMIN' ? 'Administrator' : 'Operations Manager'}
+                {currentUser?.role === 'ADMIN'
+                  ? 'Administrator'
+                  : currentUser?.role === 'POD_LEAD'
+                  ? 'Pod Lead'
+                  : currentUser?.role === 'OPERATIONS_MANAGER'
+                  ? 'Operations Manager'
+                  : currentUser?.role?.replace('_', ' ') || 'User'}
               </span>
             </div>
           </div>

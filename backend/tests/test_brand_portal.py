@@ -9,6 +9,7 @@ from app.modules.auth.models import User, UserRole
 from app.modules.operations.models import Brand, Process, BrandProcess
 from app.modules.operations.pattern_models import OperatingPattern
 from app.modules.workforce.models import Pod
+from app.modules.roster.models import Roster, RosterStatus
 from app.core.security import hash_password
 
 
@@ -166,6 +167,29 @@ def test_brand_portal_scoping_and_lifecycle(client: TestClient, db_session: Sess
     assert op_updated.operating_days == "0,1,2,3,4,5,6"
 
     # 9. Mark Implemented (Lifecycle completion after roster publication)
-    impl_resp = client.post(f"/api/v1/brand-portal/requests/{req_id}/mark-implemented", headers=csrf_headers(client))
+    target_r_id = approved_data.get("implemented_roster_id")
+    if target_r_id:
+        target_r = db_session.get(Roster, target_r_id)
+        target_r.status = RosterStatus.PUBLISHED
+        db_session.commit()
+    else:
+        pub_r = Roster(
+            id=uuid.uuid4(),
+            name="Nov 2026 Published",
+            month=11,
+            year=2026,
+            version=1,
+            status=RosterStatus.PUBLISHED,
+            created_by="ops@rosteriq.io",
+        )
+        db_session.add(pub_r)
+        db_session.commit()
+        target_r_id = pub_r.id
+
+    impl_resp = client.post(
+        f"/api/v1/brand-portal/requests/{req_id}/mark-implemented?roster_id={target_r_id}",
+        headers=csrf_headers(client),
+    )
     assert impl_resp.status_code == 200
+    assert impl_resp.json()["status"] == "IMPLEMENTED"
     assert impl_resp.json()["status"] == "IMPLEMENTED"

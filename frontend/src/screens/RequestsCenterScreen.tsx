@@ -24,6 +24,7 @@ import {
   X,
   Calendar,
   Sparkles,
+  UserPlus,
 } from 'lucide-react';
 
 interface RequestsCenterScreenProps {
@@ -31,6 +32,7 @@ interface RequestsCenterScreenProps {
   selectedRosterId: string;
   onRefreshRosters: () => Promise<void>;
   onNavigateToConflicts?: () => void;
+  onSelectRosterId?: (id: string) => void;
 }
 
 export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
@@ -38,6 +40,7 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
   selectedRosterId,
   onRefreshRosters,
   onNavigateToConflicts,
+  onSelectRosterId,
 }) => {
   const [activeTab, setActiveTab] = useState<'brand' | 'employee'>('brand');
   const [brandRequests, setBrandRequests] = useState<BrandChangeRequest[]>([]);
@@ -58,6 +61,16 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
   const [managerNotes, setManagerNotes] = useState('');
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
 
+  // Pod Lead Absence Modal
+  const [showPodAbsenceModal, setShowPodAbsenceModal] = useState(false);
+  const [podEmployees, setPodEmployees] = useState<any[]>([]);
+  const [targetEmpId, setTargetEmpId] = useState('');
+  const [absenceType, setAbsenceType] = useState('LEAVE');
+  const [absenceReason, setAbsenceReason] = useState('PLANNED_LEAVE');
+  const [absenceStart, setAbsenceStart] = useState('2026-11-18');
+  const [absenceEnd, setAbsenceEnd] = useState('2026-11-19');
+  const [absenceNotes, setAbsenceNotes] = useState('');
+
   useEffect(() => {
     loadRequests();
   }, []);
@@ -66,16 +79,46 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
     try {
       setLoading(true);
       setError(null);
-      const [bReqs, eReqs] = await Promise.all([
-        api.getBrandRequests(),
+      const [bReqs, eReqs, emps] = await Promise.all([
+        api.getBrandRequests().catch(() => []),
         api.getEmployeeRequests(),
+        api.getEmployees().catch(() => []),
       ]);
       setBrandRequests(bReqs);
       setEmployeeRequests(eReqs);
+      setPodEmployees(emps);
+      if (emps.length > 0 && !targetEmpId) {
+        setTargetEmpId(emps[0].id);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load requests');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePodAbsenceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetEmpId) return;
+    try {
+      setActionLoading(true);
+      setError(null);
+      await api.submitEmployeeRequest({
+        employee_id: targetEmpId,
+        request_type: absenceType,
+        reason_type: absenceReason,
+        start_date: absenceStart,
+        end_date: absenceEnd,
+        notes: absenceNotes || 'Leave request submitted by Pod Lead.',
+      });
+      setSuccess('Pod employee absence request submitted successfully.');
+      setShowPodAbsenceModal(false);
+      setAbsenceNotes('');
+      await loadRequests();
+    } catch (err: any) {
+      setError(err.message || 'Failed to submit pod absence request');
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -101,7 +144,7 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
     setManagerNotes('');
     try {
       setPreviewLoading(true);
-      const preview = await api.previewEmployeeRequestImpact(req.id);
+      const preview = await api.previewEmployeeRequestImpact(req.id, selectedRosterId || undefined);
       setEmpPreview(preview);
     } catch (err: any) {
       console.error(err);
@@ -116,12 +159,18 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
     try {
       setActionLoading(true);
       setError(null);
-      await api.approveBrandRequest(selectedBrandReq.id, managerNotes || undefined);
-      setSuccess(`Brand operating plan change approved. Affected draft rosters marked STALE.`);
+      const approved = await api.approveBrandRequest(selectedBrandReq.id, managerNotes || undefined);
+      setSuccess(`Brand operating plan change approved. Calendar and active roster synchronized.`);
       setSelectedBrandReq(null);
       setBrandPreview(null);
       await onRefreshRosters();
+      if (approved.implemented_roster_id && onSelectRosterId) {
+        onSelectRosterId(approved.implemented_roster_id);
+      }
       await loadRequests();
+      if (onNavigateToConflicts) {
+        onNavigateToConflicts();
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to approve brand request');
     } finally {
@@ -152,12 +201,23 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
     try {
       setActionLoading(true);
       setError(null);
-      await api.approveEmployeeRequest(selectedEmpReq.id, managerNotes || undefined);
-      setSuccess(`Employee leave request approved. Conflicting shifts ready for automated conflict resolution.`);
+      const approved = await api.approveEmployeeRequest(
+        selectedEmpReq.id,
+        managerNotes || undefined,
+        selectedRosterId || undefined
+      );
+      setSuccess(`Employee leave request approved. Calendar and active roster synchronized with conflicting shifts.`);
       setSelectedEmpReq(null);
       setEmpPreview(null);
       await onRefreshRosters();
+      if (approved.implemented_roster_id && onSelectRosterId) {
+        onSelectRosterId(approved.implemented_roster_id);
+      }
       await loadRequests();
+      // Directly transition manager to conflict resolver or calendar to see the impact
+      if (onNavigateToConflicts) {
+        onNavigateToConflicts();
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to approve employee leave request');
     } finally {
@@ -235,15 +295,23 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
-            <FileText className="w-6 h-6 text-indigo-400" /> Requests & Change Approval Centre
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+            <FileText className="w-6 h-6 text-indigo-500 dark:text-indigo-400" /> Requests & Change Approval Centre
           </h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Review partner brand operating plan changes and employee absence requests with instant impact simulation
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          {podEmployees.length > 0 && (
+            <button
+              onClick={() => setShowPodAbsenceModal(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium shadow-sm transition-colors cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" /> Submit Pod Absence
+            </button>
+          )}
           {onNavigateToConflicts && (
             <button
               onClick={onNavigateToConflicts}
@@ -351,12 +419,21 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">{getStatusBadge(req.status)}</td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => handleInspectBrand(req)}
-                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium inline-flex items-center gap-1 shadow-sm"
-                        >
-                          Review & Preview <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
+                        {req.status === 'PENDING' ? (
+                          <button
+                            onClick={() => handleInspectBrand(req)}
+                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium inline-flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+                          >
+                            Review & Preview <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleInspectBrand(req)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium inline-flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-slate-400" /> View Details <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -408,12 +485,21 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">{getStatusBadge(req.status)}</td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => handleInspectEmployee(req)}
-                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium inline-flex items-center gap-1 shadow-sm"
-                      >
-                        Review & Impact <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
+                      {req.status === 'PENDING' ? (
+                        <button
+                          onClick={() => handleInspectEmployee(req)}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium inline-flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+                        >
+                          Review & Impact <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleInspectEmployee(req)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium inline-flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-slate-400" /> View Details <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -430,11 +516,17 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-indigo-400" /> Review Brand Plan Change: {selectedBrandReq.brand_name}
+                  <Building2 className="w-5 h-5 text-indigo-400" />{' '}
+                  {selectedBrandReq.status === 'PENDING'
+                    ? `Review Brand Plan Change: ${selectedBrandReq.brand_name}`
+                    : `Plan Change Details: ${selectedBrandReq.brand_name}`}
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Request #{selectedBrandReq.id.slice(0, 8)} • Type: {selectedBrandReq.request_type}
-                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-xs text-slate-400">
+                    Request #{selectedBrandReq.id.slice(0, 8)} • Type: {selectedBrandReq.request_type}
+                  </p>
+                  {getStatusBadge(selectedBrandReq.status)}
+                </div>
               </div>
               <button
                 onClick={() => {
@@ -453,6 +545,41 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
               </div>
             ) : brandPreview ? (
               <div className="space-y-4 text-xs">
+                {/* Status Explanation Banner for Processed Requests */}
+                {selectedBrandReq.status === 'IMPLEMENTED' && (
+                  <div className="p-3.5 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-200 flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-teal-400 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-xs">Request Implemented</p>
+                      <p className="text-[11px] text-teal-300/80">
+                        The operating plan change has been finalized and synchronized with the production calendar.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {selectedBrandReq.status === 'ROSTER_PENDING' && (
+                  <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 flex items-center gap-2.5">
+                    <RefreshCw className="w-4 h-4 text-indigo-400 shrink-0 animate-spin" />
+                    <div>
+                      <p className="font-semibold text-xs">Approved — Roster Re-sync Pending</p>
+                      <p className="text-[11px] text-indigo-300/80">
+                        Plan change approved. Active draft roster updated and awaiting final resolution in Conflict Resolver.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {selectedBrandReq.status === 'REJECTED' && (
+                  <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-200 flex items-center gap-2.5">
+                    <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-xs">Request Rejected</p>
+                      <p className="text-[11px] text-rose-300/80">
+                        This plan change request was declined with reviewer feedback.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Summary Box */}
                 <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-200">
                   <p className="font-semibold text-sm mb-1">
@@ -489,19 +616,30 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                   </div>
                 </div>
 
-                {/* Notes Input */}
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    Operations Manager Notes / Response
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={managerNotes}
-                    onChange={(e) => setManagerNotes(e.target.value)}
-                    placeholder="Enter review feedback or approval notes..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                {/* Notes Input / Display */}
+                {selectedBrandReq.status === 'PENDING' ? (
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">
+                      Operations Manager Notes / Response
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={managerNotes}
+                      onChange={(e) => setManagerNotes(e.target.value)}
+                      placeholder="Enter review feedback or approval notes..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                ) : (
+                  selectedBrandReq.review_notes && (
+                    <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+                      <span className="text-[11px] font-semibold text-slate-400 block mb-1">
+                        Manager Review Feedback
+                      </span>
+                      <p className="text-slate-300 italic">"{selectedBrandReq.review_notes}"</p>
+                    </div>
+                  )
+                )}
               </div>
             ) : (
               <div className="text-center py-6 text-slate-500">
@@ -517,29 +655,49 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                   setSelectedBrandReq(null);
                   setBrandPreview(null);
                 }}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium"
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium cursor-pointer"
               >
                 Close
               </button>
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={actionLoading || selectedBrandReq.status !== 'PENDING'}
-                  onClick={handleRejectBrand}
-                  className="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-medium disabled:opacity-50"
-                >
-                  Reject Request
-                </button>
-                <button
-                  type="button"
-                  disabled={actionLoading || selectedBrandReq.status !== 'PENDING'}
-                  onClick={handleApproveBrand}
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 disabled:opacity-50 flex items-center gap-1.5"
-                >
-                  <Check className="w-4 h-4" /> Approve Plan Change
-                </button>
-              </div>
+              {selectedBrandReq.status === 'PENDING' ? (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={handleRejectBrand}
+                    className="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-medium disabled:opacity-50 cursor-pointer"
+                  >
+                    Reject Request
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={handleApproveBrand}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" /> Approve Plan Change
+                  </button>
+                </div>
+              ) : (
+                (selectedBrandReq.status === 'ROSTER_PENDING' || selectedBrandReq.status === 'IMPLEMENTED') && onNavigateToConflicts && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const rosterId = selectedBrandReq.implemented_roster_id;
+                      setSelectedBrandReq(null);
+                      setBrandPreview(null);
+                      if (rosterId && onSelectRosterId) {
+                        onSelectRosterId(rosterId);
+                      }
+                      onNavigateToConflicts();
+                    }}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <ShieldAlert className="w-4 h-4" /> Open Conflict Resolver
+                  </button>
+                )
+              )}
             </div>
           </div>
         </div>
@@ -552,11 +710,17 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <User className="w-5 h-5 text-indigo-400" /> Review Leave: {selectedEmpReq.employee_name}
+                  <User className="w-5 h-5 text-indigo-400" />{' '}
+                  {selectedEmpReq.status === 'PENDING'
+                    ? `Review Leave: ${selectedEmpReq.employee_name}`
+                    : `Leave Request Details: ${selectedEmpReq.employee_name}`}
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {selectedEmpReq.start_date} to {selectedEmpReq.end_date} • {selectedEmpReq.reason_type}
-                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-xs text-slate-400">
+                    {selectedEmpReq.start_date} to {selectedEmpReq.end_date} • {selectedEmpReq.reason_type}
+                  </p>
+                  {getStatusBadge(selectedEmpReq.status)}
+                </div>
               </div>
               <button
                 onClick={() => {
@@ -575,6 +739,41 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
               </div>
             ) : empPreview ? (
               <div className="space-y-4 text-xs">
+                {/* Status Explanation Banner for Processed Requests */}
+                {selectedEmpReq.status === 'IMPLEMENTED' && (
+                  <div className="p-3.5 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-200 flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-teal-400 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-xs">Leave Request Implemented</p>
+                      <p className="text-[11px] text-teal-300/80">
+                        Approved leave is active on the calendar and all shift conflicts have been resolved.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {selectedEmpReq.status === 'ROSTER_PENDING' && (
+                  <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 flex items-center gap-2.5">
+                    <RefreshCw className="w-4 h-4 text-indigo-400 shrink-0 animate-spin" />
+                    <div>
+                      <p className="font-semibold text-xs">Approved — Roster Re-sync Pending</p>
+                      <p className="text-[11px] text-indigo-300/80">
+                        Leave approved and unavailability marked. Conflicting shifts identified and awaiting resolution in Conflict Resolver.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {selectedEmpReq.status === 'REJECTED' && (
+                  <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-200 flex items-center gap-2.5">
+                    <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-xs">Leave Request Rejected</p>
+                      <p className="text-[11px] text-rose-300/80">
+                        This leave request was declined by the Operations Manager.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Conflict Status */}
                 <div
                   className={`p-3.5 rounded-xl border ${
@@ -594,7 +793,7 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                 {/* Conflicting Shifts List */}
                 {empPreview.conflicting_allocations.length > 0 && (
                   <div className="space-y-2">
-                    <h4 className="font-semibold text-white">Conflicting Shifts to Reassign:</h4>
+                    <h4 className="font-semibold text-white">Conflicting Shifts:</h4>
                     <div className="space-y-1.5 max-h-40 overflow-y-auto">
                       {empPreview.conflicting_allocations.map((c) => (
                         <div
@@ -616,19 +815,30 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                   </div>
                 )}
 
-                {/* Notes Input */}
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    Manager Review Feedback
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={managerNotes}
-                    onChange={(e) => setManagerNotes(e.target.value)}
-                    placeholder="Enter review notes for employee..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                {/* Notes Input / Display */}
+                {selectedEmpReq.status === 'PENDING' ? (
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">
+                      Manager Review Feedback
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={managerNotes}
+                      onChange={(e) => setManagerNotes(e.target.value)}
+                      placeholder="Enter review notes for employee..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                ) : (
+                  selectedEmpReq.review_notes && (
+                    <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+                      <span className="text-[11px] font-semibold text-slate-400 block mb-1">
+                        Manager Review Feedback
+                      </span>
+                      <p className="text-slate-300 italic">"{selectedEmpReq.review_notes}"</p>
+                    </div>
+                  )
+                )}
               </div>
             ) : null}
 
@@ -640,30 +850,182 @@ export const RequestsCenterScreen: React.FC<RequestsCenterScreenProps> = ({
                   setSelectedEmpReq(null);
                   setEmpPreview(null);
                 }}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium"
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium cursor-pointer"
               >
                 Close
               </button>
 
-              <div className="flex gap-2">
+              {selectedEmpReq.status === 'PENDING' ? (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={handleRejectEmployee}
+                    className="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-medium disabled:opacity-50 cursor-pointer"
+                  >
+                    Reject Request
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={handleApproveEmployee}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" /> Approve Leave
+                  </button>
+                </div>
+              ) : (
+                (selectedEmpReq.status === 'ROSTER_PENDING' || selectedEmpReq.status === 'IMPLEMENTED') && onNavigateToConflicts && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const rosterId = selectedEmpReq.implemented_roster_id;
+                      setSelectedEmpReq(null);
+                      setEmpPreview(null);
+                      if (rosterId && onSelectRosterId) {
+                        onSelectRosterId(rosterId);
+                      }
+                      onNavigateToConflicts();
+                    }}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <ShieldAlert className="w-4 h-4" /> Open Conflict Resolver
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Submit Pod Absence Modal */}
+      {showPodAbsenceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-indigo-400" /> Submit Pod Member Absence
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowPodAbsenceModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePodAbsenceSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1.5">
+                  Select Pod Employee
+                </label>
+                <select
+                  value={targetEmpId}
+                  onChange={(e) => setTargetEmpId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  required
+                >
+                  {podEmployees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({emp.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1.5">
+                    Request Type
+                  </label>
+                  <select
+                    value={absenceType}
+                    onChange={(e) => setAbsenceType(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  >
+                    <option value="LEAVE">Leave</option>
+                    <option value="SICK_LEAVE">Sick Leave</option>
+                    <option value="WEEKLY_OFF">Weekly Off</option>
+                    <option value="COMP_OFF">Comp Off</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1.5">
+                    Reason Type
+                  </label>
+                  <select
+                    value={absenceReason}
+                    onChange={(e) => setAbsenceReason(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  >
+                    <option value="PLANNED_LEAVE">Planned Leave</option>
+                    <option value="SICK_LEAVE">Medical / Sick</option>
+                    <option value="APPROVED_OFF">Approved Off</option>
+                    <option value="COMP_OFF">Compensatory Off</option>
+                    <option value="TRAINING">Training / Workshop</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1.5">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={absenceStart}
+                    onChange={(e) => setAbsenceStart(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none font-mono"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1.5">
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    value={absenceEnd}
+                    onChange={(e) => setAbsenceEnd(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none font-mono"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1.5">
+                  Notes / Reason
+                </label>
+                <textarea
+                  value={absenceNotes}
+                  onChange={(e) => setAbsenceNotes(e.target.value)}
+                  placeholder="Reason for absence or scheduling adjustment..."
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button
                   type="button"
-                  disabled={actionLoading || selectedEmpReq.status !== 'PENDING'}
-                  onClick={handleRejectEmployee}
-                  className="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-medium disabled:opacity-50"
+                  onClick={() => setShowPodAbsenceModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 cursor-pointer"
                 >
-                  Reject Request
+                  Cancel
                 </button>
                 <button
-                  type="button"
-                  disabled={actionLoading || selectedEmpReq.status !== 'PENDING'}
-                  onClick={handleApproveEmployee}
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 disabled:opacity-50 flex items-center gap-1.5"
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md disabled:opacity-50 cursor-pointer"
                 >
-                  <Check className="w-4 h-4" /> Approve Leave
+                  {actionLoading ? 'Submitting...' : 'Submit Request'}
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}

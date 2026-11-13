@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import uuid
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,7 +22,14 @@ from app.modules.auth.dependencies import (
 from app.modules.auth.models import User, UserRole
 from app.modules.auth.notifications import create_notification, notify_managers
 from app.modules.operations.models import Brand, BrandProcess, Process
-from app.modules.roster.models import Roster, RosterAllocation, RosterStatus
+from app.modules.roster.models import (
+    ConflictSeverity,
+    EmployeeShift,
+    Roster,
+    RosterAllocation,
+    RosterConflict,
+    RosterStatus,
+)
 from app.modules.roster.router import check_and_mark_stale_rosters, compute_config_hash
 from app.modules.workforce.availability_models import AbsenceReasonType, EmployeeUnavailability
 from app.modules.workforce.employee_portal_schemas import (
@@ -111,6 +120,7 @@ def get_employee_profile(
 def get_employee_tasks(
     month: int | None = None,
     year: int | None = None,
+    published_only: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(require_employee_user),
 ) -> list[EmployeeTaskItem]:
@@ -136,6 +146,8 @@ def get_employee_tasks(
                 roster_cache[a.roster_id] = r
         roster = roster_cache.get(a.roster_id)
         if not roster:
+            continue
+        if published_only and roster.status != RosterStatus.PUBLISHED:
             continue
 
         if month and roster.month != month:
@@ -179,10 +191,96 @@ def get_employee_tasks(
                 process_name=process.name if process else "Process",
                 process_code=process.code if process else "",
                 allocation_type=a.allocation_type.value if hasattr(a.allocation_type, "value") else str(a.allocation_type),
+                employee_id=a.employee_id,
             )
         )
 
     tasks.sort(key=lambda t: (t.date, t.start_time))
+    return tasks
+
+
+@router.get("/pod-allocations", response_model=list[EmployeeTaskItem])
+def get_pod_allocations(
+    month: int | None = None,
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_employee_user),
+) -> list[EmployeeTaskItem]:
+    """Returns all published allocations for employees in the user's pod."""
+    if not user.pod_id:
+        raise AppError("FORBIDDEN", "User is not associated with any pod.", 403)
+
+    pod_emps = db.scalars(select(Employee).where(Employee.pod_id == user.pod_id)).all()
+    emp_map = {e.id: e.name for e in pod_emps}
+    if not emp_map:
+        return []
+
+    allocs = db.scalars(
+        select(RosterAllocation).where(RosterAllocation.employee_id.in_(list(emp_map.keys())))
+    ).all()
+
+    roster_cache: dict[UUID, Roster] = {}
+    bp_cache: dict[UUID, BrandProcess] = {}
+    brand_cache: dict[UUID, Brand] = {}
+    proc_cache: dict[UUID, Process] = {}
+
+    tasks: list[EmployeeTaskItem] = []
+    for a in allocs:
+        if a.roster_id not in roster_cache:
+            r = db.get(Roster, a.roster_id)
+            if r:
+                roster_cache[a.roster_id] = r
+        roster = roster_cache.get(a.roster_id)
+        if not roster or roster.status != RosterStatus.PUBLISHED:
+            continue
+
+        if month and roster.month != month:
+            continue
+        if year and roster.year != year:
+            continue
+
+        if a.brand_process_id not in bp_cache:
+            bp = db.get(BrandProcess, a.brand_process_id)
+            if bp:
+                bp_cache[a.brand_process_id] = bp
+        bp = bp_cache.get(a.brand_process_id)
+        if not bp:
+            continue
+
+        if bp.brand_id not in brand_cache:
+            b = db.get(Brand, bp.brand_id)
+            if b:
+                brand_cache[bp.brand_id] = b
+        brand = brand_cache.get(bp.brand_id)
+
+        if bp.process_id not in proc_cache:
+            p = db.get(Process, bp.process_id)
+            if p:
+                proc_cache[bp.process_id] = p
+        process = proc_cache.get(bp.process_id)
+
+        day_name = a.date.strftime("%A")
+        tasks.append(
+            EmployeeTaskItem(
+                allocation_id=a.id,
+                roster_id=roster.id,
+                roster_name=roster.name,
+                roster_status=roster.status.value,
+                date=a.date.isoformat(),
+                day_of_week=day_name,
+                start_time=a.start_time.isoformat(),
+                end_time=a.end_time.isoformat(),
+                brand_name=brand.name if brand else "Brand",
+                brand_code=brand.code if brand else "",
+                process_name=process.name if process else "Process",
+                process_code=process.code if process else "",
+                allocation_type=a.allocation_type.value if hasattr(a.allocation_type, "value") else str(a.allocation_type),
+                employee_id=a.employee_id,
+                employee_name=emp_map.get(a.employee_id, "Pod Colleague"),
+            )
+        )
+
+    tasks.sort(key=lambda t: (t.date, t.start_time, t.employee_name or ""))
     return tasks
 
 
@@ -192,13 +290,29 @@ def submit_availability_request(
     db: Session = Depends(get_db),
     user: User = Depends(require_employee_user),
 ) -> EmployeeAvailabilityRequestRead:
-    """Submits an employee absence or availability adjustment request (leaves active availability unchanged until manager approval)."""
-    if not user.employee_id:
-        raise AppError("FORBIDDEN", "User is not linked to any employee record.", 403)
+    """Submits an employee absence or availability adjustment request. Employees submit for themselves; Pod Leads can submit for their pod members."""
+    target_emp_id = None
+    if user.role == UserRole.POD_LEAD:
+        target_emp_id = payload.employee_id or user.employee_id
+    elif user.role == UserRole.EMPLOYEE:
+        target_emp_id = user.employee_id
+    else:
+        target_emp_id = payload.employee_id or user.employee_id
 
-    emp = db.get(Employee, user.employee_id)
+    if not target_emp_id:
+        raise AppError("FORBIDDEN", "Target employee not specified or user is not linked to any employee record.", 403)
+
+    emp = db.get(Employee, target_emp_id)
     if not emp:
         raise AppError("NOT_FOUND", "Employee not found.", 404)
+
+    # Tenant scoping:
+    if user.role == UserRole.POD_LEAD:
+        if emp.pod_id != user.pod_id:
+            raise AppError("FORBIDDEN", "Pod Leads can only submit requests for employees within their own pod.", 403)
+    elif user.role == UserRole.EMPLOYEE:
+        if emp.id != user.employee_id:
+            raise AppError("FORBIDDEN", "Employees can only submit absence requests for themselves.", 403)
 
     start_d = date.fromisoformat(payload.start_date)
     end_d = date.fromisoformat(payload.end_date)
@@ -220,10 +334,11 @@ def submit_availability_request(
     db.flush()
 
     # Notify Ops Managers
+    submitted_by = f"Pod Lead ({user.email})" if user.role == UserRole.POD_LEAD else emp.name
     notify_managers(
         db=db,
         title=f"New Leave Request: {emp.name}",
-        message=f"{emp.name} requested {payload.reason_type} from {payload.start_date} to {payload.end_date}: {payload.notes}",
+        message=f"{submitted_by} submitted {payload.reason_type} for {emp.name} from {payload.start_date} to {payload.end_date}: {payload.notes}",
         notification_type="NEW_EMPLOYEE_REQUEST",
         reference_type="employee_availability_request",
         reference_id=req.id,
@@ -295,6 +410,7 @@ def get_employee_request(
 @router.post("/requests/{request_id}/preview-impact", response_model=EmployeeImpactPreview)
 def preview_employee_request_impact(
     request_id: UUID,
+    roster_id: UUID | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_lead_or_manager),
 ) -> EmployeeImpactPreview:
@@ -310,6 +426,27 @@ def preview_employee_request_impact(
     if emp.pod_id:
         check_pod_scope(user, emp.pod_id)
 
+    # Resolve target roster
+    target_roster = None
+    if roster_id:
+        target_roster = db.get(Roster, roster_id)
+    if not target_roster:
+        target_roster = db.scalar(
+            select(Roster)
+            .where(
+                Roster.month == req.start_date.month,
+                Roster.year == req.start_date.year,
+                Roster.status == RosterStatus.PUBLISHED,
+            )
+            .order_by(Roster.version.desc())
+        )
+    if not target_roster:
+        target_roster = db.scalar(
+            select(Roster)
+            .where(Roster.month == req.start_date.month, Roster.year == req.start_date.year)
+            .order_by(Roster.version.desc(), Roster.created_at.desc())
+        )
+
     # Dates range
     curr = req.start_date
     dates_list = []
@@ -317,13 +454,15 @@ def preview_employee_request_impact(
         dates_list.append(curr)
         curr += timedelta(days=1)
 
-    # Check allocations
-    conflicts = db.scalars(
-        select(RosterAllocation).where(
-            RosterAllocation.employee_id == emp.id,
-            RosterAllocation.date.in_(dates_list),
-        )
-    ).all()
+    # Check allocations filtered to the targeted operational roster
+    alloc_filter = [
+        RosterAllocation.employee_id == emp.id,
+        RosterAllocation.date.in_(dates_list),
+    ]
+    if target_roster:
+        alloc_filter.append(RosterAllocation.roster_id == target_roster.id)
+
+    conflicts = db.scalars(select(RosterAllocation).where(*alloc_filter)).all()
 
     bp_cache: dict[UUID, BrandProcess] = {}
     b_cache: dict[UUID, Brand] = {}
@@ -387,6 +526,7 @@ def preview_employee_request_impact(
 def approve_employee_request(
     request_id: UUID,
     payload: EmployeeReviewActionRequest | None = None,
+    roster_id: UUID | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_manager),
 ) -> EmployeeAvailabilityRequestRead:
@@ -430,9 +570,103 @@ def approve_employee_request(
             existing.notes = req.notes
         curr += timedelta(days=1)
 
-    # 3. Mark draft rosters STALE
+    # 3. Mark draft rosters STALE and recompute conflicts on draft rosters
     new_hash = compute_config_hash(db)
     check_and_mark_stale_rosters(db, new_hash)
+    from app.modules.roster.recompute import recompute_roster_conflicts_sync
+
+    # Resolve target roster: prioritise requested roster or PUBLISHED production roster
+    target_roster = None
+    if roster_id:
+        target_roster = db.get(Roster, roster_id)
+    if not target_roster:
+        target_roster = db.scalar(
+            select(Roster)
+            .where(
+                Roster.month == req.start_date.month,
+                Roster.year == req.start_date.year,
+                Roster.status == RosterStatus.PUBLISHED,
+            )
+            .order_by(Roster.version.desc())
+        )
+    if not target_roster:
+        target_roster = db.scalar(
+            select(Roster)
+            .where(Roster.month == req.start_date.month, Roster.year == req.start_date.year)
+            .order_by(Roster.version.desc(), Roster.created_at.desc())
+        )
+
+    if target_roster:
+        if target_roster.status == RosterStatus.PUBLISHED:
+            # Fork child draft from published parent
+            max_v = max(
+                r.version
+                for r in db.scalars(
+                    select(Roster).where(
+                        Roster.month == target_roster.month, Roster.year == target_roster.year
+                    )
+                ).all()
+            )
+            child = Roster(
+                id=uuid.uuid4(),
+                name=f"{target_roster.name} (v{max_v + 1})",
+                month=target_roster.month,
+                year=target_roster.year,
+                version=max_v + 1,
+                parent_roster_id=target_roster.id,
+                status=RosterStatus.DRAFT,
+                config_hash=new_hash,
+                created_by=user.email,
+            )
+            db.add(child)
+            db.flush()
+
+            parent_shifts = db.scalars(
+                select(EmployeeShift).where(EmployeeShift.roster_id == target_roster.id)
+            ).all()
+            shift_map: dict[uuid.UUID, uuid.UUID] = {}
+            for s in parent_shifts:
+                new_s = EmployeeShift(
+                    id=uuid.uuid4(),
+                    roster_id=child.id,
+                    employee_id=s.employee_id,
+                    date=s.date,
+                    start_time=s.start_time,
+                    end_time=s.end_time,
+                    is_working_day=s.is_working_day,
+                )
+                db.add(new_s)
+                shift_map[s.id] = new_s.id
+            db.flush()
+
+            parent_allocs = db.scalars(
+                select(RosterAllocation).where(RosterAllocation.roster_id == target_roster.id)
+            ).all()
+            for a in parent_allocs:
+                new_sid = shift_map.get(a.shift_id)
+                if not new_sid:
+                    continue
+                new_a = RosterAllocation(
+                    id=uuid.uuid4(),
+                    roster_id=child.id,
+                    shift_id=new_sid,
+                    employee_id=a.employee_id,
+                    brand_process_id=a.brand_process_id,
+                    date=a.date,
+                    start_time=a.start_time,
+                    end_time=a.end_time,
+                    allocation_type=a.allocation_type,
+                    reassigned_from_employee_id=a.reassigned_from_employee_id,
+                    is_cross_pod_approved=a.is_cross_pod_approved,
+                    reassignment_reason=a.reassignment_reason,
+                )
+                db.add(new_a)
+            db.flush()
+            target_roster = child
+
+        # Recompute conflicts on the draft / child roster
+        recompute_roster_conflicts_sync(db, target_roster.id)
+        req.implemented_roster_id = target_roster.id
 
     # 4. Update status
     req.status = RequestStatus.ROSTER_PENDING.value
@@ -460,6 +694,7 @@ def approve_employee_request(
     if emp:
         res.employee_name = emp.name
     return res
+
 
 
 @router.post("/requests/{request_id}/reject", response_model=EmployeeAvailabilityRequestRead)
@@ -508,6 +743,7 @@ def reject_employee_request(
     return res
 
 
+
 @router.post("/requests/{request_id}/mark-implemented", response_model=EmployeeAvailabilityRequestRead)
 def mark_employee_request_implemented(
     request_id: UUID,
@@ -520,21 +756,68 @@ def mark_employee_request_implemented(
     if not req:
         raise AppError("NOT_FOUND", "Request not found.", 404)
 
-    emp = db.get(Employee, req.employee_id)
+    # 1. State integrity checks: reject repetitive or invalid transitions
+    if req.status == RequestStatus.IMPLEMENTED.value:
+        raise AppError("CONFLICT", "Request is already marked as IMPLEMENTED.", 409)
+    if req.status == RequestStatus.REJECTED.value:
+        raise AppError("CONFLICT", "Cannot mark a rejected request as implemented.", 409)
+    if req.status == RequestStatus.PENDING.value:
+        raise AppError("CONFLICT", "Cannot mark a pending request as implemented. Request must be reviewed and approved first.", 409)
+
+    # 2. Resolve associated roster
     roster = None
     if roster_id:
         roster = db.get(Roster, roster_id)
-        if not roster or roster.status != RosterStatus.PUBLISHED:
-            raise AppError("BAD_REQUEST", "Target roster must be PUBLISHED to mark request implemented.", 400)
-        req.implemented_roster_id = roster.id
+    elif req.implemented_roster_id:
+        roster = db.get(Roster, req.implemented_roster_id)
 
+    if not roster:
+        raise AppError("BAD_REQUEST", "No associated child roster found to verify implementation.", 400)
+
+    # 3. Lineage validation: roster must cover request period and match lineage
+    if roster.month != req.start_date.month or roster.year != req.start_date.year:
+        raise AppError("BAD_REQUEST", "Target roster does not cover the month and year of the request period.", 400)
+    if req.implemented_roster_id and roster.id != req.implemented_roster_id and roster.parent_roster_id != req.implemented_roster_id:
+        raise AppError("BAD_REQUEST", "Target roster does not belong to the approved child version lineage.", 400)
+
+    # 4. Roster publication verification
+    if roster.status != RosterStatus.PUBLISHED:
+        raise AppError("BAD_REQUEST", f"Target roster must be PUBLISHED to mark request implemented (current status: {roster.status.value}).", 400)
+
+    # 5. Independent conflict validation: no blocking conflicts remaining on published roster
+    blocking_conflicts = db.scalars(
+        select(RosterConflict).where(
+            RosterConflict.roster_id == roster.id,
+            RosterConflict.severity == ConflictSeverity.HARD_VIOLATION,
+        )
+    ).all()
+    if blocking_conflicts:
+        raise AppError("CONFLICT", f"Cannot mark implemented: target roster has {len(blocking_conflicts)} unresolved blocking conflicts.", 409)
+
+    # 6. Reflection verification: ensure employee has no scheduled shifts on approved leave dates
+    violating_allocations = db.scalars(
+        select(RosterAllocation).where(
+            RosterAllocation.roster_id == roster.id,
+            RosterAllocation.employee_id == req.employee_id,
+            RosterAllocation.date >= req.start_date,
+            RosterAllocation.date <= req.end_date,
+        )
+    ).all()
+    if violating_allocations:
+        raise AppError(
+            "CONFLICT",
+            f"Cannot mark implemented: {len(violating_allocations)} conflicting shifts remain scheduled on the published roster during approved leave.",
+            409,
+        )
+
+    # 7. Transition to IMPLEMENTED
     req.status = RequestStatus.IMPLEMENTED.value
+    req.implemented_roster_id = roster.id
     db.flush()
 
+    emp = db.get(Employee, req.employee_id)
     message = (
         f"Your approved leave schedule is now fully resolved and live in published Roster v{roster.version} ({roster.name})."
-        if roster
-        else "Your approved leave has been implemented in active rosters."
     )
 
     create_notification(
@@ -543,8 +826,8 @@ def mark_employee_request_implemented(
         title="Leave Schedule Published",
         message=message,
         notification_type="ROSTER_PUBLISHED_FOR_EMPLOYEE",
-        reference_type="roster" if roster else "employee_availability_request",
-        reference_id=roster.id if roster else req.id,
+        reference_type="roster",
+        reference_id=roster.id,
     )
 
     db.commit()
@@ -554,3 +837,66 @@ def mark_employee_request_implemented(
     if emp:
         res.employee_name = emp.name
     return res
+
+
+@router.get("/export/csv")
+def export_employee_schedule_csv(
+    roster_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_employee_user),
+) -> Response:
+    """Exports the authenticated employee's personal schedule to CSV for a specified or latest active roster."""
+    if not user.employee_id:
+        raise AppError("FORBIDDEN", "User has no associated employee record.", 403)
+
+    if not roster_id:
+        roster = db.scalars(
+            select(Roster)
+            .where(Roster.status == RosterStatus.PUBLISHED)
+            .order_by(Roster.year.desc(), Roster.month.desc(), Roster.version.desc())
+        ).first()
+        if not roster:
+            roster = db.scalars(select(Roster).order_by(Roster.created_at.desc())).first()
+        if not roster:
+            raise HTTPException(status_code=404, detail="No active roster found to export")
+        roster_id = roster.id
+
+    from app.modules.roster.router import export_roster_csv
+    return export_roster_csv(roster_id=roster_id, view_type="employee", filter_id=user.employee_id, db=db, _user=user)
+
+
+class EmployeeGoogleSheetsExportRequest(BaseModel):
+    roster_id: UUID | None = None
+    google_access_token: str | None = None
+
+
+@router.post("/export/google-sheets")
+def export_employee_schedule_google_sheets(
+    payload: EmployeeGoogleSheetsExportRequest = EmployeeGoogleSheetsExportRequest(),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_employee_user),
+) -> dict:
+    """Exports the authenticated employee's schedule directly to a new Google Spreadsheet."""
+    if not user.employee_id:
+        raise AppError("FORBIDDEN", "User has no associated employee record.", 403)
+
+    target_roster_id = payload.roster_id
+    if not target_roster_id:
+        roster = db.scalars(
+            select(Roster)
+            .where(Roster.status == RosterStatus.PUBLISHED)
+            .order_by(Roster.year.desc(), Roster.month.desc(), Roster.version.desc())
+        ).first()
+        if not roster:
+            roster = db.scalars(select(Roster).order_by(Roster.created_at.desc())).first()
+        if not roster:
+            raise HTTPException(status_code=404, detail="No active roster found to export")
+        target_roster_id = roster.id
+
+    from app.modules.roster.router import export_roster_google_sheets, GoogleSheetsExportRequest
+    sheets_payload = GoogleSheetsExportRequest(
+        view_type="employee", filter_id=user.employee_id, google_access_token=payload.google_access_token
+    )
+    res = export_roster_google_sheets(roster_id=target_roster_id, payload=sheets_payload, db=db, _user=user)
+    return res.model_dump()
+

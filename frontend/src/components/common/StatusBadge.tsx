@@ -39,7 +39,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ type, status, size = '
         return (
           <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-amber-50 text-amber-700 border border-amber-200/80 ${sizeClasses}`}>
             <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-            Stale (Config Drift)
+            Roster Update Required
           </span>
         );
       default:

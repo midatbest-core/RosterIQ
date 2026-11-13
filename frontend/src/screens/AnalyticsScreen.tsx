@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { RosterSummary, WorkforceAnalytics } from '../services/types';
+import { RosterSummary, WorkforceAnalytics, User } from '../services/types';
 import { MetricCard } from '../components/common/MetricCard';
 import {
   Users,
@@ -23,17 +23,20 @@ interface AnalyticsScreenProps {
   rosters: RosterSummary[];
   selectedRosterId: string;
   onNavigateTab?: (tab: NavTab) => void;
+  currentUser?: User | null;
 }
 
 export const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({
   rosters,
   selectedRosterId,
   onNavigateTab,
+  currentUser,
 }) => {
   const [analytics, setAnalytics] = useState<WorkforceAnalytics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isPodLead = currentUser?.role === 'POD_LEAD';
   const currentRoster = rosters.find((r) => r.id === selectedRosterId) || rosters[0];
 
   useEffect(() => {
@@ -65,7 +68,7 @@ export const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({
               <BrainCircuit className="w-5 h-5" />
             </span>
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              Workforce Capacity & Pod Intelligence
+              {isPodLead ? 'Pod Workforce Capacity & Analytics' : 'Workforce Capacity & Pod Intelligence'}
             </h1>
             {currentRoster && (
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
@@ -78,7 +81,9 @@ export const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({
             )}
           </div>
           <p className="text-xs text-slate-500">
-            Real-time analytics of pod capacity vs. demand, surplus/deficit staffing detection, and cross-pod rebalancing opportunities.
+            {isPodLead
+              ? 'Real-time analytics of your pod capacity vs. demand, utilization, and scheduled allocations.'
+              : 'Real-time analytics of pod capacity vs. demand, surplus/deficit staffing detection, and cross-pod rebalancing opportunities.'}
           </p>
         </div>
 
@@ -176,16 +181,21 @@ export const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({
               <div>
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
                   <Network className="w-4 h-4 text-indigo-600" />
-                  <span>Pod Capacity, Deficit & Surplus Analysis</span>
+                  <span>{isPodLead ? 'Pod Capacity & Allocation Analysis' : 'Pod Capacity, Deficit & Surplus Analysis'}</span>
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Identifies which pods need additional employees and which pods have free employees available for cross-pod deployment.
+                  {isPodLead
+                    ? 'Performance and capacity balance for your assigned pod members.'
+                    : 'Identifies which pods need additional employees and which pods have free employees available for cross-pod deployment.'}
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {analytics.pods.map((pod) => {
+            <div className={`grid grid-cols-1 ${isPodLead ? 'max-w-xl' : 'md:grid-cols-2 lg:grid-cols-4'} gap-4`}>
+              {(isPodLead && currentUser?.pod_id
+                ? analytics.pods.filter((p) => p.pod_id === currentUser.pod_id)
+                : analytics.pods
+              ).map((pod) => {
                 const isDeficit = pod.status === 'DEFICIT';
                 const isSurplus = pod.status === 'SURPLUS';
 
