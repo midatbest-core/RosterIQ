@@ -23,6 +23,7 @@ import {
   ArrowRightLeft,
   AlertTriangle,
   ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 
 interface WorkforceScreenProps {
@@ -86,6 +87,10 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   const [showRelocateModal, setShowRelocateModal] = useState(false);
   const [isRelocating, setIsRelocating] = useState(false);
   const [drawerPodTarget, setDrawerPodTarget] = useState<string>('');
+  const [showReoptimizePrompt, setShowReoptimizePrompt] = useState<{ empName: string; podName: string } | null>(null);
+  const [isReoptimizing, setIsReoptimizing] = useState(false);
+  const [podToDelete, setPodToDelete] = useState<Pod | null>(null);
+  const [isDeletingPod, setIsDeletingPod] = useState(false);
   const [conflictNotification, setConflictNotification] = useState<{
     title: string;
     message: string;
@@ -215,16 +220,10 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
       setSelectedEmp(updated);
       await loadWorkforceData();
       const targetPod = pods.find((p) => p.id === drawerPodTarget);
-      if (updated.conflict_check) {
-        setConflictNotification({
-          title: `Relocated ${selectedEmp.name} to ${targetPod?.name || 'New Pod'}`,
-          message: updated.conflict_check.message,
-          total_conflicts: updated.conflict_check.total_conflicts,
-          hard_conflicts: updated.conflict_check.hard_conflicts,
-        });
-      } else {
-        alert(`Successfully relocated ${selectedEmp.name} to ${targetPod?.name || 'new pod'}!`);
-      }
+      setShowReoptimizePrompt({
+        empName: selectedEmp.name,
+        podName: targetPod?.name || 'New Pod',
+      });
     } catch (err: any) {
       alert(err.message || 'Failed to relocate employee');
     } finally {
@@ -243,26 +242,52 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
     if (!relocatingEmp || !targetPodId) return;
     try {
       setIsRelocating(true);
-      const updated = await api.relocateEmployee(relocatingEmp.id, targetPodId);
+      await api.relocateEmployee(relocatingEmp.id, targetPodId);
       const targetPod = pods.find((p) => p.id === targetPodId);
       const empName = relocatingEmp.name;
       setShowRelocateModal(false);
       setRelocatingEmp(null);
       await loadWorkforceData();
-      if (updated.conflict_check) {
-        setConflictNotification({
-          title: `Relocated ${empName} to ${targetPod?.name || 'New Pod'}`,
-          message: updated.conflict_check.message,
-          total_conflicts: updated.conflict_check.total_conflicts,
-          hard_conflicts: updated.conflict_check.hard_conflicts,
-        });
-      } else {
-        alert(`Successfully relocated ${empName} to ${targetPod?.name || 'new pod'}!`);
-      }
+      setShowReoptimizePrompt({
+        empName: empName,
+        podName: targetPod?.name || 'New Pod',
+      });
     } catch (err: any) {
       alert(err.message || 'Failed to relocate employee');
     } finally {
       setIsRelocating(false);
+    }
+  };
+
+  const handleTriggerReoptimize = async () => {
+    try {
+      setIsReoptimizing(true);
+      await api.revalidateAllRosters();
+      setShowReoptimizePrompt(null);
+      if (onNavigateToConflicts) {
+        onNavigateToConflicts();
+      } else {
+        alert('Conflicts re-optimized across active rosters.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to re-optimize conflicts');
+    } finally {
+      setIsReoptimizing(false);
+    }
+  };
+
+  const handleConfirmDeletePod = async () => {
+    if (!podToDelete) return;
+    try {
+      setIsDeletingPod(true);
+      const res = await api.deletePod(podToDelete.id);
+      setPodToDelete(null);
+      await loadWorkforceData();
+      alert(res.message || 'Pod deleted and members relocated successfully.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete pod');
+    } finally {
+      setIsDeletingPod(false);
     }
   };
 
@@ -491,6 +516,16 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
                       </span>
                     </div>
                   </div>
+                  {!isPodLead && (
+                    <button
+                      type="button"
+                      onClick={() => setPodToDelete(pod)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-colors cursor-pointer"
+                      title="Delete Pod (moves members to pod with least employees)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 <div className="space-y-1.5 text-xs">
@@ -936,6 +971,101 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
           </div>
         </div>
       </Modal>
+
+      {/* Relocation Re-optimization Prompt Modal */}
+      {showReoptimizePrompt && (
+        <Modal
+          isOpen={!!showReoptimizePrompt}
+          onClose={() => setShowReoptimizePrompt(null)}
+          title="Employee Relocation Complete"
+          subtitle="Workforce allocation updated"
+          maxWidth="md"
+        >
+          <div className="space-y-4 p-1">
+            <div className="flex items-center gap-3 p-3.5 bg-indigo-50/70 border border-indigo-100 rounded-xl">
+              <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0" />
+              <p className="text-xs text-indigo-950 leading-relaxed">
+                <strong>{showReoptimizePrompt.empName}</strong> has been successfully relocated to <strong>{showReoptimizePrompt.podName}</strong>.
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-amber-50 border border-amber-200/80 rounded-xl space-y-1.5 text-xs text-amber-950">
+              <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                <Sparkles className="w-4 h-4 text-amber-600" />
+                <span>Re-optimize Conflicts</span>
+              </div>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                Relocating an employee between operational pods can alter process staffing, shift coverage, and weekly allocations. Would you like to re-optimize conflicts across active rosters now?
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowReoptimizePrompt(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+              >
+                Dismiss / Later
+              </button>
+              <button
+                type="button"
+                disabled={isReoptimizing}
+                onClick={handleTriggerReoptimize}
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isReoptimizing ? 'Re-optimizing...' : 'Re-optimize Conflicts'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Pod Confirmation Modal */}
+      {podToDelete && (
+        <Modal
+          isOpen={!!podToDelete}
+          onClose={() => setPodToDelete(null)}
+          title="Delete Pod & Relocate Members"
+          subtitle={`Permanently remove ${podToDelete.name}`}
+          maxWidth="md"
+        >
+          <div className="space-y-4 p-1">
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2 text-xs text-rose-950">
+              <div className="flex items-center gap-2 font-bold text-rose-900">
+                <AlertTriangle className="w-4 h-4 text-rose-600" />
+                <span>Confirm Pod Deletion</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-rose-800">
+                Deleting pod <strong>{podToDelete.name}</strong> will automatically transfer all{' '}
+                <strong>
+                  {employees.filter((e) => e.pod_id === podToDelete.id).length} employee(s)
+                </strong>{' '}
+                in this pod to the operational pod with the least members. The pod will then be permanently deleted.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setPodToDelete(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingPod}
+                onClick={handleConfirmDeletePod}
+                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingPod ? 'Relocating & Deleting...' : 'Confirm & Delete Pod'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Conflict Check Feedback Modal */}
       {conflictNotification && (

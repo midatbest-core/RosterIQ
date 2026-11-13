@@ -372,6 +372,11 @@ export interface RosterConflict {
   conflict_type: string;
   description: string;
   is_resolved: boolean;
+  brand_name?: string | null;
+  process_name?: string | null;
+  required_skill?: string | null;
+  pod_name?: string | null;
+  pod_id?: string | null;
 }
 
 export interface BackupCandidate {

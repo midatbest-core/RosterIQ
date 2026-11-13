@@ -72,7 +72,7 @@ def test_auto_conflict_check_on_move_employee(authenticated_client: TestClient, 
     db_session.add(emp)
     db_session.commit()
 
-    # Move employee to pod2
+    # Move employee to pod2 (auto conflict check removed after relocation per user requirement)
     resp = authenticated_client.patch(
         f"/api/v1/employees/{emp.id}",
         headers=headers,
@@ -81,6 +81,4 @@ def test_auto_conflict_check_on_move_employee(authenticated_client: TestClient, 
     assert resp.status_code == 200
     data = resp.json()
     assert data["pod_id"] == str(pod2.id)
-    assert "conflict_check" in data
-    assert data["conflict_check"] is not None
-    assert data["conflict_check"]["checked"] is True
+    assert data.get("conflict_check") is None

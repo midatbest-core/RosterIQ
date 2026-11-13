@@ -30,6 +30,7 @@ import {
   Sun,
   AlertTriangle,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react';
 
 interface OperationsScreenProps {
@@ -49,6 +50,10 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Delete Brand State
+  const [brandToDelete, setBrandToDelete] = useState<Brand | null>(null);
+  const [isDeletingBrand, setIsDeletingBrand] = useState(false);
 
   // Add Brand Form
   const [showAddBrand, setShowAddBrand] = useState(false);
@@ -298,6 +303,21 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
     }
   };
 
+  const handleConfirmDeleteBrand = async () => {
+    if (!brandToDelete) return;
+    try {
+      setIsDeletingBrand(true);
+      const res = await api.deleteBrand(brandToDelete.id);
+      setBrandToDelete(null);
+      await loadOperationsData();
+      alert(res.message || 'Brand and its processes deleted successfully.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete brand');
+    } finally {
+      setIsDeletingBrand(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Sub-Tabs Navigation */}
@@ -398,9 +418,22 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
                       <span className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
                         {b.name}
                       </span>
-                      <span className="font-mono text-[10px] bg-white px-2 py-0.5 rounded border text-slate-600">
-                        {b.code}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-[10px] bg-white px-2 py-0.5 rounded border text-slate-600">
+                          {b.code}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setBrandToDelete(b);
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-colors cursor-pointer"
+                          title="Delete Brand & its Processes"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
                       <div className="flex items-center justify-between">
@@ -947,6 +980,48 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
         credentials={createdCreds}
         onOpenConflicts={onNavigateToConflicts}
       />
+
+      {/* Delete Brand Confirmation Modal */}
+      {brandToDelete && (
+        <Modal
+          isOpen={!!brandToDelete}
+          onClose={() => setBrandToDelete(null)}
+          title="Delete Brand & Processes"
+          subtitle={`Permanently remove ${brandToDelete.name}`}
+          maxWidth="md"
+        >
+          <div className="space-y-4 p-1">
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2 text-xs text-rose-950">
+              <div className="flex items-center gap-2 font-bold text-rose-900">
+                <AlertTriangle className="w-4 h-4 text-rose-600" />
+                <span>Confirm Brand Deletion</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-rose-800">
+                Deleting brand <strong>{brandToDelete.name} ({brandToDelete.code})</strong> will permanently delete this brand and all of its associated processes, operating schedules, and primary assignments. This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setBrandToDelete(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingBrand}
+                onClick={handleConfirmDeleteBrand}
+                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingBrand ? 'Deleting...' : 'Confirm & Delete Brand'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Conflict Check Feedback Modal */}
       {conflictNotification && (

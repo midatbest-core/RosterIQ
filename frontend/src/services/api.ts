@@ -245,6 +245,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
+  deletePod: (id: string) =>
+    request<{
+      status: string;
+      deleted_pod_id: string;
+      deleted_pod_name: string;
+      target_pod_id?: string | null;
+      target_pod_name?: string;
+      moved_employees_count: number;
+      message: string;
+    }>(`/pods/${id}`, {
+      method: 'DELETE',
+    }),
 
   getEmployees: () => request<Employee[]>('/employees'),
   createEmployee: (data: Partial<Employee>) =>
@@ -306,6 +318,16 @@ export const api = {
     request<Brand>(`/brands/${brandId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    }),
+  deleteBrand: (brandId: string) =>
+    request<{
+      status: string;
+      deleted_brand_id: string;
+      deleted_brand_name: string;
+      deleted_processes_count: number;
+      message: string;
+    }>(`/brands/${brandId}`, {
+      method: 'DELETE',
     }),
 
   getProcesses: () => request<ProcessItem[]>('/processes'),

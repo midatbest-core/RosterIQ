@@ -299,7 +299,7 @@ class AutomatedConflictResolver:
                     all_proposed_allocs.extend(d_allocs)
                     all_proposed_shifts.extend(d_shifts)
                 else:
-                    per_date_limit = max(0.15, min(0.8, time_limit_seconds / max(1, len(conflicted_dates))))
+                    per_date_limit = max(0.15, min(0.6, time_limit_seconds / max(1, len(conflicted_dates))))
                     sub_result = cls.solve(
                         target_dates=[d],
                         demand_slots=d_demand,
@@ -426,7 +426,7 @@ class AutomatedConflictResolver:
             existing_allocations=existing_allocations,
             bp_pod_map=bp_pod_map,
             allow_cross_pod=False,
-            time_limit_seconds=max(1.0, time_limit_seconds / 2.0 if allow_cross_pod else time_limit_seconds),
+            time_limit_seconds=max(0.5, time_limit_seconds / 2.0 if allow_cross_pod else time_limit_seconds),
         )
         pass_results.append(pass_a_res)
 
@@ -449,7 +449,7 @@ class AutomatedConflictResolver:
                 existing_allocations=existing_allocations,
                 bp_pod_map=bp_pod_map,
                 allow_cross_pod=True,
-                time_limit_seconds=max(1.0, time_limit_seconds / 2.0),
+                time_limit_seconds=max(0.5, time_limit_seconds / 2.0),
                 min_covered_positions=pass_a_res.covered_positions,
                 min_fully_satisfied_slots=pass_a_res.fully_satisfied_slots,
             )
@@ -738,8 +738,8 @@ class AutomatedConflictResolver:
         # Adapt stage budget dynamically based on available time:
         # Give Stage 1 (coverage) and Stage 4 (churn minimization) higher proportional budgets
         # to ensure feasible continuity and prevent timeout churn.
-        total_budget = max(0.1, time_limit_seconds)
-        stage_budget = max(0.04, total_budget / 5.0)
+        total_budget = max(0.5, time_limit_seconds)
+        stage_budget = max(0.15, total_budget / 5.0)
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = float(stage_budget)
         solver.parameters.num_workers = 4

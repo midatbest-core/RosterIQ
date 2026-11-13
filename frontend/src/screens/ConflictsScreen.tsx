@@ -190,8 +190,8 @@ export const ConflictsScreen: React.FC<ConflictsScreenProps> = ({
     setReassignSlot({
       date: c.date,
       brand_process_id: c.brand_process_id || '',
-      brand_name: 'Brand Demand',
-      process_name: 'Coverage Process',
+      brand_name: c.brand_name || 'Brand Demand',
+      process_name: c.process_name || c.required_skill || 'Coverage Process',
       start_time: c.start_time || '09:00:00',
       end_time: c.end_time || '18:00:00',
       source_employee_id: c.employee_id || undefined,
@@ -796,6 +796,30 @@ export const ConflictsScreen: React.FC<ConflictsScreenProps> = ({
                     </div>
 
                     <p className="text-xs text-slate-700 leading-relaxed">{c.description}</p>
+
+                    {/* Operational Context: Required Skill, Process, Pod, Brand */}
+                    {(c.required_skill || c.process_name || c.pod_name || c.brand_name) && (
+                      <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+                        {(c.required_skill || c.process_name) && (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 border border-blue-200 text-xs font-semibold">
+                            <span className="text-[10px] uppercase tracking-wider text-blue-500 font-bold">Required Skill / Process:</span>
+                            <span className="font-bold text-blue-900">{c.required_skill || c.process_name}</span>
+                          </div>
+                        )}
+                        {c.pod_name && (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold">
+                            <span className="text-[10px] uppercase tracking-wider text-emerald-500 font-bold">Designated Pod:</span>
+                            <span className="font-bold text-emerald-900">{c.pod_name}</span>
+                          </div>
+                        )}
+                        {c.brand_name && (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-50 text-purple-800 border border-purple-200 text-xs font-semibold">
+                            <span className="text-[10px] uppercase tracking-wider text-purple-500 font-bold">Brand:</span>
+                            <span className="font-bold text-purple-900">{c.brand_name}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
                       <div className="text-[11px] text-slate-500">

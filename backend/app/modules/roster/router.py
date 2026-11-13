@@ -12,7 +12,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import AppError
@@ -104,11 +104,24 @@ from app.modules.workforce.models import (
 router = APIRouter(prefix="/rosters", tags=["Rosters"])
 
 
-def compute_config_hash(db: Session) -> str:
-    """Computes a SHA-256 hash of active rules, assignments, and availability."""
-    patterns = db.scalars(select(OperatingPattern)).all()
-    assignments = db.scalars(select(PrimaryAssignment).where(PrimaryAssignment.is_active == True)).all()
-    unavails = db.scalars(select(EmployeeUnavailability)).all()
+# In-memory cache for resolved conflict bundles between Preview and Apply operations
+# Key: (roster_id, snapshot_hash) -> ResolverResult
+_RESOLVER_PREVIEW_CACHE: dict[tuple[uuid.UUID, str], ResolverResult] = {}
+
+
+def compute_config_hash(
+    db: Session,
+    patterns: list[OperatingPattern] | None = None,
+    assignments: list[PrimaryAssignment] | None = None,
+    unavails: list[EmployeeUnavailability] | None = None,
+) -> str:
+    """Computes a SHA-256 hash of active rules, assignments, and availability, reusing prefetched entities when available."""
+    if patterns is None:
+        patterns = db.scalars(select(OperatingPattern)).all()
+    if assignments is None:
+        assignments = db.scalars(select(PrimaryAssignment).where(PrimaryAssignment.is_active == True)).all()
+    if unavails is None:
+        unavails = db.scalars(select(EmployeeUnavailability)).all()
     
     parts: list[str] = []
     for p in sorted(patterns, key=lambda x: str(x.brand_process_id)):
@@ -299,7 +312,12 @@ def generate_roster(
     ) or 0
     version = existing_count + 1
 
-    current_hash = compute_config_hash(db)
+    current_hash = compute_config_hash(
+        db,
+        patterns=patterns_db,
+        assignments=assignments_db,
+        unavails=unavails_db,
+    )
 
     # Auto-sync roster name with selected month to prevent stale "November" label for December
     roster_name = payload.name
@@ -323,7 +341,6 @@ def generate_roster(
         created_by=current_user.email,
     )
     db.add(roster)
-    db.flush()
 
     # Batch persist Shifts
     shift_entities = [
@@ -342,7 +359,6 @@ def generate_roster(
     shift_entity_map: dict[tuple[uuid.UUID, date], uuid.UUID] = {
         (s.employee_id, s.date): s.id for s in result.shifts
     }
-    db.flush()
 
     # Batch persist Allocations
     alloc_entities = []
@@ -901,21 +917,63 @@ def get_roster_grid(
                 )
             )
 
-    conflict_responses = [
-        RosterConflictResponse(
-            id=c.id,
-            date=c.date,
-            brand_process_id=c.brand_process_id,
-            employee_id=c.employee_id,
-            start_time=c.start_time,
-            end_time=c.end_time,
-            severity=c.severity,
-            conflict_type=c.conflict_type,
-            description=c.description,
-            is_resolved=c.is_resolved,
+    # Map each BrandProcess to its associated operational Pod
+    primaries_active = db.scalars(select(PrimaryAssignment).where(PrimaryAssignment.is_active == True)).all()
+    bp_pod_map: dict[uuid.UUID, uuid.UUID | None] = {}
+    for pa in primaries_active:
+        if pa.brand_process_id not in bp_pod_map:
+            emp = employees.get(pa.employee_id)
+            if emp and emp.pod_id:
+                bp_pod_map[pa.brand_process_id] = emp.pod_id
+
+    # Fallback to skills
+    for bp in bps.values():
+        if bp.id not in bp_pod_map:
+            for emp in employees.values():
+                if emp.pod_id and any(getattr(s, "process_id", None) == bp.process_id for s in getattr(emp, "process_skills", [])):
+                    bp_pod_map[bp.id] = emp.pod_id
+                    break
+
+    conflict_responses: list[RosterConflictResponse] = []
+    for c in conflicts:
+        b_name = None
+        p_name = None
+        c_pod_id = None
+        c_pod_name = None
+
+        if c.brand_process_id and c.brand_process_id in bps:
+            bp = bps[c.brand_process_id]
+            b_name = brands[bp.brand_id].name if bp.brand_id in brands else None
+            p_name = processes[bp.process_id].name if bp.process_id in processes else None
+            c_pod_id = bp_pod_map.get(bp.id)
+            if c_pod_id and c_pod_id in pods:
+                c_pod_name = pods[c_pod_id].name
+
+        if not c_pod_id and c.employee_id and c.employee_id in employees:
+            emp = employees[c.employee_id]
+            if emp.pod_id and emp.pod_id in pods:
+                c_pod_id = emp.pod_id
+                c_pod_name = pods[c_pod_id].name
+
+        conflict_responses.append(
+            RosterConflictResponse(
+                id=c.id,
+                date=c.date,
+                brand_process_id=c.brand_process_id,
+                employee_id=c.employee_id,
+                start_time=c.start_time,
+                end_time=c.end_time,
+                severity=c.severity,
+                conflict_type=c.conflict_type,
+                description=c.description,
+                is_resolved=c.is_resolved,
+                brand_name=b_name,
+                process_name=p_name,
+                required_skill=p_name,
+                pod_name=c_pod_name,
+                pod_id=c_pod_id,
+            )
         )
-        for c in conflicts
-    ]
 
     return RosterGridViewResponse(
         roster_id=roster.id,
@@ -1961,12 +2019,11 @@ def _load_solver_inputs(roster: Roster, db: Session):
         ).all()
     }
 
-    active_emps = db.scalars(select(Employee).where(Employee.status == EmployeeStatus.ACTIVE)).all()
-    skills = db.scalars(select(EmployeeProcessSkill)).all()
-    skills_map: dict[uuid.UUID, set[uuid.UUID]] = {}
-    for s in skills:
-        skills_map.setdefault(s.employee_id, set()).add(s.process_id)
-
+    active_emps = db.scalars(
+        select(Employee)
+        .options(selectinload(Employee.process_skills))
+        .where(Employee.status == EmployeeStatus.ACTIVE)
+    ).all()
     emp_map = {
         e.id: EmployeeSpec(
             id=e.id,
@@ -1976,19 +2033,20 @@ def _load_solver_inputs(roster: Roster, db: Session):
             daily_capacity_minutes=e.daily_capacity_minutes,
             standard_start_time=e.standard_start_time,
             standard_end_time=e.standard_end_time,
-            skill_process_ids=skills_map.get(e.id, set()),
+            skill_process_ids=frozenset(s.process_id for s in e.process_skills if s.is_active),
             is_active=True,
         )
         for e in active_emps
     }
 
+    db_assignments = db.scalars(select(PrimaryAssignment).where(PrimaryAssignment.is_active == True)).all()
     primaries = [
         PrimaryAssignmentSpec(
             employee_id=pa.employee_id,
             brand_process_id=pa.brand_process_id,
             priority=pa.priority,
         )
-        for pa in db.scalars(select(PrimaryAssignment).where(PrimaryAssignment.is_active == True)).all()
+        for pa in db_assignments
     ]
 
     unavails = db.scalars(
@@ -2083,6 +2141,10 @@ def _load_solver_inputs(roster: Roster, db: Session):
                     bp_pod_map[bp_id] = emp.pod_id
                     break
 
+    all_pods = db.scalars(select(Pod)).all()
+    all_brands = db.scalars(select(Brand)).all()
+    all_processes = db.scalars(select(Process)).all()
+
     return {
         "target_dates": target_dates,
         "demand_slots": demand_slots,
@@ -2097,6 +2159,13 @@ def _load_solver_inputs(roster: Roster, db: Session):
         "existing_shifts": existing_shifts,
         "brand_processes": bp_list,
         "bp_pod_map": bp_pod_map,
+        "emp_records": {e.id: e for e in active_emps},
+        "pods_map": {p.id: p for p in all_pods},
+        "brands_map": {b.id: b for b in all_brands},
+        "processes_map": {pr.id: pr for pr in all_processes},
+        "bp_records": {bp.id: bp for bp in bps},
+        "patterns_db": patterns,
+        "assignments_db": db_assignments,
     }
 
 
@@ -2131,12 +2200,15 @@ def preview_conflict_resolutions(
         time_limit_seconds=15.0,
     )
 
-    # Entities lookup for rich response
-    emp_by_id = {e.id: e for e in db.scalars(select(Employee)).all()}
-    pod_by_id = {p.id: p for p in db.scalars(select(Pod)).all()}
-    bp_by_id = {bp.id: bp for bp in db.scalars(select(BrandProcess)).all()}
-    brand_by_id = {b.id: b for b in db.scalars(select(Brand)).all()}
-    proc_by_id = {pr.id: pr for pr in db.scalars(select(Process)).all()}
+    # Cache verified solve result for instantaneous reuse in apply
+    _RESOLVER_PREVIEW_CACHE[(roster.id, result.snapshot_hash)] = result
+
+    # Entities lookup from preloaded inputs without extra database roundtrips
+    emp_by_id = inputs.get("emp_records") or {e.id: e for e in db.scalars(select(Employee)).all()}
+    pod_by_id = inputs.get("pods_map") or {p.id: p for p in db.scalars(select(Pod)).all()}
+    bp_by_id = inputs.get("bp_records") or {bp.id: bp for bp in db.scalars(select(BrandProcess)).all()}
+    brand_by_id = inputs.get("brands_map") or {b.id: b for b in db.scalars(select(Brand)).all()}
+    proc_by_id = inputs.get("processes_map") or {pr.id: pr for pr in db.scalars(select(Process)).all()}
 
     def format_bundle(bundle: ResolutionBundle) -> ResolverBundleResponse:
         changes_data = []
@@ -2187,7 +2259,7 @@ def preview_conflict_resolutions(
             auto_bundles.append(formatted)
 
     if current_user.role == UserRole.POD_LEAD and current_user.pod_id:
-        pod_emp_ids = set(str(eid) for eid in db.scalars(select(Employee.id).where(Employee.pod_id == current_user.pod_id)).all())
+        pod_emp_ids = {str(eid) for eid, e in emp_by_id.items() if getattr(e, "pod_id", None) == current_user.pod_id}
         auto_bundles = [
             b for b in auto_bundles
             if any((ch.get("previous_employee_id") in pod_emp_ids) or (ch.get("new_employee_id") in pod_emp_ids) for ch in b.changes)
@@ -2344,22 +2416,40 @@ def apply_conflict_resolutions(
 
     # Load solver inputs
     inputs = _load_solver_inputs(target_roster, db)
-    result = AutomatedConflictResolver.solve(
+    current_snapshot_hash = AutomatedConflictResolver.compute_snapshot_hash(
         target_dates=inputs["target_dates"],
         demand_slots=inputs["demand_slots"],
         employees=inputs["employees"],
-        patterns=inputs["patterns"],
-        overrides=inputs["overrides"],
-        company_holidays=inputs["holidays"],
         primary_assignments=inputs["primary_assignments"],
         unavailabilities=inputs["unavailabilities"],
         preferences=inputs["preferences"],
         existing_allocations=inputs["existing_allocations"],
-        existing_shifts=inputs["existing_shifts"],
-        brand_processes=inputs["brand_processes"],
-        bp_pod_map=inputs["bp_pod_map"],
-        time_limit_seconds=15.0,
     )
+
+    # Re-use verified analysis result if available for this exact roster state
+    cached_result = _RESOLVER_PREVIEW_CACHE.get((target_roster.id, current_snapshot_hash))
+    if not cached_result and roster.id != target_roster.id:
+        cached_result = _RESOLVER_PREVIEW_CACHE.get((roster.id, current_snapshot_hash))
+
+    if cached_result:
+        result = cached_result
+    else:
+        result = AutomatedConflictResolver.solve(
+            target_dates=inputs["target_dates"],
+            demand_slots=inputs["demand_slots"],
+            employees=inputs["employees"],
+            patterns=inputs["patterns"],
+            overrides=inputs["overrides"],
+            company_holidays=inputs["holidays"],
+            primary_assignments=inputs["primary_assignments"],
+            unavailabilities=inputs["unavailabilities"],
+            preferences=inputs["preferences"],
+            existing_allocations=inputs["existing_allocations"],
+            existing_shifts=inputs["existing_shifts"],
+            brand_processes=inputs["brand_processes"],
+            bp_pod_map=inputs["bp_pod_map"],
+            time_limit_seconds=15.0,
+        )
 
     # Filter bundles to apply
     approved_set = set(payload.approved_bundle_ids or [])
@@ -2379,7 +2469,7 @@ def apply_conflict_resolutions(
         (s.employee_id, s.date): s
         for s in db.scalars(select(EmployeeShift).where(EmployeeShift.roster_id == target_roster.id)).all()
     }
-    emp_records: dict[uuid.UUID, Employee] = {
+    emp_records: dict[uuid.UUID, Employee] = inputs.get("emp_records") or {
         e.id: e for e in db.scalars(select(Employee)).all()
     }
     alloc_by_id: dict[uuid.UUID, RosterAllocation] = {
@@ -2473,37 +2563,45 @@ def apply_conflict_resolutions(
 
     db.flush()
 
-    # Re-run IndependentValidator to guarantee absolute constraint safety
-    updated_inputs = _load_solver_inputs(target_roster, db)
-    # Build shifts for validator
+    # Re-run IndependentValidator in-memory to guarantee absolute constraint safety without extra DB roundtrips
+    updated_allocations = [
+        ScheduledAllocation(
+            id=a.id,
+            employee_id=a.employee_id,
+            brand_process_id=a.brand_process_id,
+            date=a.date,
+            interval=TimeInterval(a.start_time, a.end_time),
+            allocation_type=EngineAllocationType(a.allocation_type.value if hasattr(a.allocation_type, "value") else str(a.allocation_type)),
+            is_cross_pod_approved=a.is_cross_pod_approved,
+        )
+        for a in alloc_by_id.values()
+    ]
+
     shifts_by_emp_date: dict[tuple[uuid.UUID, date], list[TimeInterval]] = {}
-    for a in updated_inputs["existing_allocations"]:
+    for a in updated_allocations:
         shifts_by_emp_date.setdefault((a.employee_id, a.date), []).append(a.interval)
 
-    all_shifts = []
-    for (eid, d), intervals in shifts_by_emp_date.items():
-        min_start = min(i.start_time for i in intervals)
-        max_end = max(i.end_time for i in intervals)
-        all_shifts.append(
-            ScheduledShift(
-                id=uuid.uuid4(),
-                employee_id=eid,
-                date=d,
-                interval=TimeInterval(min_start, max_end),
-                is_working_day=True,
-            )
+    all_shifts = [
+        ScheduledShift(
+            id=uuid.uuid4(),
+            employee_id=eid,
+            date=d,
+            interval=TimeInterval(min(i.start_time for i in intervals), max(i.end_time for i in intervals)),
+            is_working_day=True,
         )
+        for (eid, d), intervals in shifts_by_emp_date.items()
+    ]
 
     val_conflicts = IndependentValidator.validate_roster(
-        all_dates=updated_inputs["target_dates"],
-        brand_processes=updated_inputs["brand_processes"],
-        patterns=updated_inputs["patterns"],
-        overrides=updated_inputs["overrides"],
-        company_holidays=updated_inputs["holidays"],
-        employees=updated_inputs["employees"],
-        unavailabilities=updated_inputs["unavailabilities"],
+        all_dates=inputs["target_dates"],
+        brand_processes=inputs["brand_processes"],
+        patterns=inputs["patterns"],
+        overrides=inputs["overrides"],
+        company_holidays=inputs["holidays"],
+        employees=inputs["employees"],
+        unavailabilities=inputs["unavailabilities"],
         shifts=all_shifts,
-        allocations=updated_inputs["existing_allocations"],
+        allocations=updated_allocations,
     )
 
     hard_violations = [vc for vc in val_conflicts if vc.severity == EngineConflictSeverity.HARD_VIOLATION]
@@ -2515,38 +2613,43 @@ def apply_conflict_resolutions(
             detail=f"Independent validator rejected proposed changes: {hard_violations[0].description}",
         )
 
-    # Sync RosterConflict table
-    # Delete old conflicts for target roster
-    old_conflicts = db.scalars(select(RosterConflict).where(RosterConflict.roster_id == target_roster.id)).all()
-    for oc in old_conflicts:
-        db.delete(oc)
-    db.flush()
+    # Sync RosterConflict table via single bulk delete + add_all
+    db.execute(delete(RosterConflict).where(RosterConflict.roster_id == target_roster.id))
 
-    # Insert updated conflicts
-    for vc in val_conflicts:
-        db.add(
-            RosterConflict(
-                roster_id=target_roster.id,
-                date=vc.date,
-                brand_process_id=vc.brand_process_id,
-                employee_id=vc.employee_id,
-                start_time=vc.interval.start_time if vc.interval else None,
-                end_time=vc.interval.end_time if vc.interval else None,
-                severity=ConflictSeverity.HARD_VIOLATION if vc.severity == EngineConflictSeverity.HARD_VIOLATION else ConflictSeverity.SOFT_WARNING,
-                conflict_type=ConflictType(vc.conflict_type.value),
-                description=vc.description,
-                is_resolved=False,
-            )
+    new_conflicts = [
+        RosterConflict(
+            roster_id=target_roster.id,
+            date=vc.date,
+            brand_process_id=vc.brand_process_id,
+            employee_id=vc.employee_id,
+            start_time=vc.interval.start_time if vc.interval else None,
+            end_time=vc.interval.end_time if vc.interval else None,
+            severity=ConflictSeverity.HARD_VIOLATION if vc.severity == EngineConflictSeverity.HARD_VIOLATION else ConflictSeverity.SOFT_WARNING,
+            conflict_type=ConflictType(vc.conflict_type.value),
+            description=vc.description,
+            is_resolved=False,
         )
+        for vc in val_conflicts
+    ]
+    if new_conflicts:
+        db.add_all(new_conflicts)
 
-    hard_count = len([vc for vc in val_conflicts if vc.severity == EngineConflictSeverity.HARD_VIOLATION])
-    target_roster.config_hash = compute_config_hash(db)
+    hard_count = len(hard_violations)
+    target_roster.config_hash = compute_config_hash(
+        db,
+        patterns=inputs.get("patterns_db"),
+        assignments=inputs.get("assignments_db"),
+    )
     target_roster.status = RosterStatus.VALIDATED if hard_count == 0 else RosterStatus.DRAFT
+
+    # Evict preview cache for target roster and source roster
+    _RESOLVER_PREVIEW_CACHE.pop((target_roster.id, current_snapshot_hash), None)
+    _RESOLVER_PREVIEW_CACHE.pop((roster.id, current_snapshot_hash), None)
 
     db.commit()
 
-    total_demand = len(updated_inputs["existing_allocations"]) + hard_count
-    cov_pct = round((len(updated_inputs["existing_allocations"]) / total_demand * 100.0), 1) if total_demand > 0 else 100.0
+    total_demand = len(updated_allocations) + hard_count
+    cov_pct = round((len(updated_allocations) / total_demand * 100.0), 1) if total_demand > 0 else 100.0
 
     return ResolverApplyResponse(
         status="SUCCESS",
