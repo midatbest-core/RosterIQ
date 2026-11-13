@@ -258,11 +258,10 @@ export const BrandPortalScreen: React.FC = () => {
       {/* Notifications / Alerts */}
       {error && (
         <div
-          className={`p-4 rounded-xl flex items-start justify-between gap-3 text-sm ${
-            error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')
+          className={`p-4 rounded-xl flex items-start justify-between gap-3 text-sm ${error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS')
               ? 'bg-amber-500/10 border border-amber-500/30 text-amber-200'
               : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
-          }`}
+            }`}
         >
           <div className="flex items-start gap-3 flex-1">
             {error.includes('Google Sheets') || error.includes('GOOGLE_SHEETS') ? (
@@ -390,11 +389,10 @@ export const BrandPortalScreen: React.FC = () => {
                         return (
                           <span
                             key={dayAbbr}
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                              isActive
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${isActive
                                 ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
                                 : 'bg-slate-800 text-slate-500 border border-slate-800/80'
-                            }`}
+                              }`}
                           >
                             {dayAbbr}
                           </span>
@@ -644,11 +642,10 @@ export const BrandPortalScreen: React.FC = () => {
                       key={item.type}
                       type="button"
                       onClick={() => setRequestType(item.type)}
-                      className={`p-2.5 rounded-xl border text-left font-medium transition-all ${
-                        requestType === item.type
+                      className={`p-2.5 rounded-xl border text-left font-medium transition-all ${requestType === item.type
                           ? 'bg-indigo-600/20 border-indigo-500 text-indigo-200'
                           : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
+                        }`}
                     >
                       {item.label}
                     </button>
@@ -668,11 +665,10 @@ export const BrandPortalScreen: React.FC = () => {
                           key={day}
                           type="button"
                           onClick={() => toggleDay(idx)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                            selected
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${selected
                               ? 'bg-indigo-600 text-white border-indigo-500'
                               : 'bg-slate-900 text-slate-400 border-slate-700 hover:border-slate-600'
-                          }`}
+                            }`}
                         >
                           {day}
                         </button>
@@ -856,3 +852,4 @@ export const BrandPortalScreen: React.FC = () => {
   );
 };
 export default BrandPortalScreen;
+
