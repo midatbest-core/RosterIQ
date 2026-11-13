@@ -185,3 +185,4 @@ To maintain total engineering integrity, we explicitly state what has **not** be
 3. **No Multi-Slot Solver Proof**: The CP-SAT solver has only been verified on a single disrupted slot. Multi-slot concurrent resolution capacity is untested until distinct slot keys are benchmarked.
 4. **No Direct Neon PgBouncer Pool Benchmarks**: Database micro-benchmarks were performed on local SQLite. Neon PostgreSQL operates behind a cloud PgBouncer pool with network latency (50-150ms per round trip depending on region).
 5. **Connection Pool Retraction**: Previous recommendations to set `pool_size=20, max_overflow=30` in production are retracted due to Neon's 100-connection account ceiling.
+

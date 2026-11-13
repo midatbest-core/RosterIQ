@@ -63,3 +63,4 @@ python docs/benchmarks/benchmark_db.py
 1. **In-Process Isolation**: The ASGI concurrency tests use `httpx.ASGITransport(app=app)` to measure pure application CPU and serialization overhead without TCP, TLS, or public internet routing.
 2. **Local Database Isolation**: Micro-benchmarks use an isolated SQLite 3 file in WAL mode to guarantee zero disruption to the staging Neon PostgreSQL database.
 3. **Multi-Slot Resolver Retraction**: Solver capacity was measured on a single disrupted slot. Previous multi-slot synthetic tests with duplicated slot keys have been retracted.
+

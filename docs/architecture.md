@@ -338,3 +338,4 @@ To deliver real-time notifications to connected clients without the connection o
 - **Protocol**: Server-Sent Events (SSE) streaming over standard HTTP (`text/event-stream`).
 - **Fanout Speed**: Empirical micro-benchmarks demonstrate multicast fanout across 200 connected subscriber queues in **0.82 ms** (>245,000 events/sec).
 - **Auto-Reconnect**: Client-side `EventSource` automatically reconnects upon temporary transport interruptions, passing the last received event ID.
+
