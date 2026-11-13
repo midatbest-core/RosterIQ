@@ -20,6 +20,7 @@ import {
   Lock,
   GitBranch,
 } from 'lucide-react';
+import { RosterSelector } from '../components/roster/RosterSelector';
 
 export const RosterScreen: React.FC = () => {
   const [rosters, setRosters] = useState<RosterSummary[]>([]);
@@ -223,17 +224,12 @@ export const RosterScreen: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <select
-            value={selectedRosterId}
-            onChange={(e) => setSelectedRosterId(e.target.value)}
-            className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {rosters.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name} (v{r.version} - {r.status})
-              </option>
-            ))}
-          </select>
+          <RosterSelector
+            rosters={rosters}
+            selectedRosterId={selectedRosterId}
+            onSelectRosterId={setSelectedRosterId}
+            onOpenGenerateRoster={() => setShowGenModal(true)}
+          />
 
           <button
             onClick={() => setShowGenModal(true)}

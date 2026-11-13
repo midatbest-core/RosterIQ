@@ -99,10 +99,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     api.getQuickLoginAccounts()
       .then((data) => {
         if (!active) return;
-        if (data && (data.employees?.length > 0 || data.brands?.length > 0)) {
-          setQuickAccounts(data);
-          if (data.employees?.length > 0) {
-            const firstEmp = data.employees[0];
+        if (data) {
+          const filteredEmps = (data.employees || []).filter(
+            (e) =>
+              !['EMP55', 'EMP56', 'EMP57', 'EMP001'].includes(e.employee_code || '') &&
+              !['aditya@example.com', 'demo@example.com', 'rohit@example.com', 'botemp@email.com'].includes(e.email) &&
+              !e.pod_name?.toLowerCase().includes('new pod')
+          );
+          const filteredBrands = (data.brands || []).filter(
+            (b) => !b.name.toLowerCase().includes('new brand') && b.code !== 'NEW' && b.code !== 'TEST'
+          );
+          setQuickAccounts({ employees: filteredEmps, brands: filteredBrands });
+          if (filteredEmps.length > 0) {
+            const firstEmp = filteredEmps[0];
             setSelectedEmpId(firstEmp.id);
             setEmail(firstEmp.email);
             setPassword(firstEmp.password);

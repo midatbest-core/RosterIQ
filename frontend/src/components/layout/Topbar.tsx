@@ -11,6 +11,7 @@ import {
 import { User, RosterSummary, AppNotification } from '../../services/types';
 import { NavTab } from './Sidebar';
 import { NotificationBell } from '../notifications/NotificationBell';
+import { RosterSelector } from '../roster/RosterSelector';
 
 interface TopbarProps {
   activeTab: NavTab;
@@ -117,24 +118,12 @@ export const Topbar: React.FC<TopbarProps> = ({
           />
         </div>
 
-        {/* Active Roster Selector */}
-        {rosters.length > 0 && (
-          <div className="relative flex items-center">
-            <select
-              value={selectedRosterId}
-              onChange={(e) => onSelectRosterId(e.target.value)}
-              className="appearance-none pl-8 pr-8 py-1.5 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 rounded-lg focus:outline-hidden focus:border-indigo-500 cursor-pointer shadow-2xs hover:bg-slate-100 transition-all"
-            >
-              {rosters.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name} (v{r.version}) — {r.status}
-                </option>
-              ))}
-            </select>
-            <Calendar className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 pointer-events-none" />
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
-          </div>
-        )}
+        {/* Visual Active Roster Selector */}
+        <RosterSelector
+          rosters={rosters}
+          selectedRosterId={selectedRosterId}
+          onSelectRosterId={onSelectRosterId}
+        />
       </div>
 
       {/* Right Controls: Conflict Pill & User Profile */}

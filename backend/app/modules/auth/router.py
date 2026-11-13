@@ -226,7 +226,11 @@ def get_quick_login_accounts(db: Session = Depends(get_db)) -> dict:
     from app.modules.operations.models import Brand
 
     employees = db.scalars(
-        select(Employee).where(Employee.status == "ACTIVE").order_by(Employee.name)
+        select(Employee).where(
+            Employee.status == "ACTIVE",
+            ~Employee.employee_code.in_(["EMP55", "EMP56", "EMP57", "EMP001"]),
+            ~Employee.email.in_(["aditya@example.com", "demo@example.com", "rohit@example.com", "botemp@email.com"]),
+        ).order_by(Employee.name)
     ).all()
     pod_map = {p.id: p.name for p in db.scalars(select(Pod)).all()}
 
@@ -243,7 +247,13 @@ def get_quick_login_accounts(db: Session = Depends(get_db)) -> dict:
             "role": "EMPLOYEE",
         })
 
-    brands = db.scalars(select(Brand).where(Brand.status == "ACTIVE").order_by(Brand.name)).all()
+    brands = db.scalars(
+        select(Brand).where(
+            Brand.status == "ACTIVE",
+            ~Brand.name.ilike("%new brand%"),
+            ~Brand.code.in_(["NEW", "TEST"]),
+        ).order_by(Brand.name)
+    ).all()
     brand_list = []
     for b in brands:
         b_clean = b.code.lower().replace("_", "").replace("-", "")
