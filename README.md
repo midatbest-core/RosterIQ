@@ -1,7 +1,9 @@
 # RosterIQ
 
 RosterIQ is a multi-brand workforce scheduling application that builds monthly rosters, records scheduling conflicts, and supports manager-reviewed reassignment.
-
+> **Submission for DataStraw Tech Assessment**  
+> **Candidate**: Aditya Shinde 
+>  
 [Live application](https://roster-iq-delta.vercel.app) · [API documentation](https://rosteriq-backend-km04.onrender.com/docs) · [GitHub repository](https://github.com/midatbest-core/RosterIQ)
 
 > These deployment URLs are configured in the repository, but availability could not be independently confirmed during the documentation audit on 13 November 2026.
