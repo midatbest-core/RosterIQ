@@ -184,6 +184,26 @@ export const EmployeePortalScreen: React.FC = () => {
     return tasks.find((t) => t.date === dateStr) || null;
   };
 
+  // Helper: get 7 days of the week containing the base date (Mon - Sun)
+  const getWeekDays = (baseDateStr: string) => {
+    const d = new Date(baseDateStr + 'T00:00:00');
+    const dayOfWeek = d.getDay(); // 0 is Sunday, 1 is Monday...
+    const distanceToMonday = (dayOfWeek + 6) % 7;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - distanceToMonday);
+
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const cur = new Date(monday);
+      cur.setDate(monday.getDate() + i);
+      const y = cur.getFullYear();
+      const m = String(cur.getMonth() + 1).padStart(2, '0');
+      const dayNum = String(cur.getDate()).padStart(2, '0');
+      days.push(`${y}-${m}-${dayNum}`);
+    }
+    return days;
+  };
+
   // Month Navigation
   const handlePrevMonth = () => {
     if (currentMonth === 1) {
@@ -671,13 +691,75 @@ export const EmployeePortalScreen: React.FC = () => {
           </div>
         )}
 
-        {/* View Mode 2: Day-by-Day Stepper View */}
+        {/* View Mode 2: Interactive Day-by-Day View */}
         {viewMode === 'day' && (
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-md space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+            {/* Week Ribbon Day Selector */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Weekly Sequence ({getWeekDays(selectedDate)[0]} to {getWeekDays(selectedDate)[6]})
+                </span>
+                <span className="text-xs text-indigo-400 font-medium">Click any day to jump</span>
+              </div>
+              <div className="grid grid-cols-7 gap-2">
+                {getWeekDays(selectedDate).map((dayStr) => {
+                  const dObj = new Date(dayStr + 'T00:00:00');
+                  const dayName = dObj.toLocaleDateString(undefined, { weekday: 'short' });
+                  const dayNum = dObj.getDate();
+                  const isDaySelected = dayStr === selectedDate;
+                  const isDayToday = dayStr === todayIso;
+                  const dShift = getShiftForDate(dayStr);
+                  const dLeave = getLeaveForDate(dayStr);
+
+                  return (
+                    <button
+                      key={dayStr}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(dayStr);
+                        setCurrentMonth(dObj.getMonth() + 1);
+                        setCurrentYear(dObj.getFullYear());
+                      }}
+                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                        isDaySelected
+                          ? 'bg-indigo-600/30 border-indigo-500 text-white shadow-md ring-1 ring-indigo-500/50'
+                          : isDayToday
+                          ? 'bg-slate-800/80 border-slate-700 text-white hover:border-slate-600'
+                          : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      <span className="text-[10px] font-semibold uppercase tracking-wider block">
+                        {dayName}
+                      </span>
+                      <span className={`text-base font-bold ${isDaySelected ? 'text-white' : 'text-slate-200'}`}>
+                        {dayNum}
+                      </span>
+                      {dLeave.isLeave ? (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
+                          Leave
+                        </span>
+                      ) : dShift ? (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
+                          Shift
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-800 text-slate-500 whitespace-nowrap">
+                          Off
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Stepper Navigation Controls */}
+            <div className="flex items-center justify-between border-t border-slate-800 pt-3">
               <button
+                type="button"
                 onClick={() => handleStepDay(-1)}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
                 <span>Previous Day</span>
@@ -691,8 +773,9 @@ export const EmployeePortalScreen: React.FC = () => {
               </div>
 
               <button
+                type="button"
                 onClick={() => handleStepDay(1)}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <span>Next Day</span>
                 <ChevronRight className="w-4 h-4" />

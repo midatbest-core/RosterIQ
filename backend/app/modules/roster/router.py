@@ -673,12 +673,22 @@ def get_roster_grid(
         conflicts = [c for c in conflicts if c.employee_id in pod_emp_ids]
         shifts = [s for s in shifts if s.employee_id in pod_emp_ids]
         allocs = [a for a in allocs if a.employee_id in pod_emp_ids]
-        filter_id = _user.pod_id
+        if view_type == "employee":
+            if filter_id and filter_id in pod_emp_ids:
+                pass
+            elif _user.employee_id and _user.employee_id in pod_emp_ids:
+                filter_id = _user.employee_id
+            else:
+                filter_id = None
+        else:
+            filter_id = _user.pod_id
 
     if view_type in ("company", "employee", "pod"):
         target_employees = list(employees.values())
         if _user.role == UserRole.POD_LEAD and _user.pod_id:
             target_employees = [e for e in target_employees if e.pod_id == _user.pod_id]
+            if view_type == "employee" and filter_id:
+                target_employees = [e for e in target_employees if e.id == filter_id]
         elif view_type == "pod" and filter_id:
             target_employees = [e for e in target_employees if e.pod_id == filter_id]
         elif view_type == "employee" and filter_id:

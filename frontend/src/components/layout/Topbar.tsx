@@ -63,6 +63,8 @@ export const Topbar: React.FC<TopbarProps> = ({
         return currentUser?.role === 'POD_LEAD'
           ? { section: 'Pod Schedule', title: 'Pod Calendar Workspace' }
           : { section: 'Scheduling', title: 'Roster Calendar Workspace' };
+      case 'my-schedule':
+        return { section: 'Pod Schedule', title: 'My Work Allocation & Schedule' };
       case 'conflicts':
         return currentUser?.role === 'POD_LEAD'
           ? { section: 'Pod Schedule', title: 'Pod Conflicts & Exceptions' }
@@ -94,7 +96,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   const currentRoster = rosters.find((r) => r.id === selectedRosterId);
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between z-30 shrink-0">
+    <header className="relative h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between z-50 shrink-0">
       {/* Breadcrumb & Title */}
       <div className="flex flex-col">
         <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">

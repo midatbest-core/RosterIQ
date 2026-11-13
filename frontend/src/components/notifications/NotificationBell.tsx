@@ -49,7 +49,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
   };
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative z-50" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen((prev) => !prev)}
         className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
@@ -71,7 +71,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-xl shadow-2xl z-[100] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-xs text-slate-800">Notifications</span>

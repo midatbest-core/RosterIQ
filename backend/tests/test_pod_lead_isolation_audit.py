@@ -819,3 +819,33 @@ def test_employee_idor_security_suite(client: TestClient, audit_fixture: dict, d
     assert res_pod.status_code == 200
     pod_tasks = res_pod.json()
     assert not any(t.get("employee_id") == str(emp_b.id) for t in pod_tasks)
+
+
+def test_pod_lead_can_view_own_allocation(client: TestClient, audit_fixture: dict):
+    """
+    Verifies that a Pod Lead has their employee_id resolved, can access their personal
+    allocation in the grid view (view_type=employee), and can access personal tasks.
+    """
+    login_as(client, "lead.alpha@rosteriq.io")
+    roster_id = audit_fixture["roster_pub"].id
+
+    # 1. /auth/me returns employee_id
+    me_res = client.get("/api/v1/auth/me")
+    assert me_res.status_code == 200
+    me_data = me_res.json()
+    assert me_data["employee_id"] is not None
+    lead_emp_id = me_data["employee_id"]
+
+    # 2. Pod Lead requests their own employee allocation grid
+    grid_res = client.get(
+        f"/api/v1/rosters/{roster_id}/grid?view_type=employee&filter_id={lead_emp_id}"
+    )
+    assert grid_res.status_code == 200
+    grid_data = grid_res.json()
+    assert len(grid_data["rows"]) == 1
+    assert grid_data["rows"][0]["row_id"] == lead_emp_id
+
+    # 3. Pod Lead can access their own personal tasks via employee portal
+    tasks_res = client.get("/api/v1/employee-portal/tasks")
+    assert tasks_res.status_code == 200
+

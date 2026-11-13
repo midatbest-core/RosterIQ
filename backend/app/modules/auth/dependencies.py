@@ -5,6 +5,7 @@ from collections.abc import Callable
 from uuid import UUID
 
 from fastapi import Depends, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -25,6 +26,13 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise AppError("NOT_AUTHENTICATED", "The user is inactive or no longer exists.", 401)
+    if user.role == UserRole.POD_LEAD and not user.employee_id and user.pod_id:
+        from app.modules.workforce.models import PodLead
+        pl = db.scalar(select(PodLead).where(PodLead.pod_id == user.pod_id))
+        if pl:
+            user.employee_id = pl.employee_id
+            db.commit()
+            db.refresh(user)
     return user
 
 

@@ -44,7 +44,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (currentUser?.role === 'POD_LEAD') {
-      const allowedTabs: NavTab[] = ['roster', 'analytics', 'conflicts', 'employees', 'requests'];
+      const allowedTabs: NavTab[] = ['roster', 'my-schedule', 'analytics', 'conflicts', 'employees', 'requests'];
       if (!allowedTabs.includes(activeTab)) {
         setActiveTab('roster');
       }
@@ -112,7 +112,7 @@ export const App: React.FC = () => {
   if (currentUser.role === 'BRAND_USER') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-        <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
+        <header className="relative z-50 border-b border-slate-800 bg-slate-900/80 backdrop-blur px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <RosterIQLogo variant="full" size="md" showTagline={false} />
             <div className="h-5 w-px bg-slate-800" />
@@ -149,7 +149,7 @@ export const App: React.FC = () => {
   if (currentUser.role === 'EMPLOYEE') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-        <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
+        <header className="relative z-50 border-b border-slate-800 bg-slate-900/80 backdrop-blur px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <RosterIQLogo variant="full" size="md" showTagline={false} />
             <div className="h-5 w-px bg-slate-800" />
@@ -242,6 +242,10 @@ export const App: React.FC = () => {
           onNavigateToConflicts={() => setActiveTab('conflicts')}
           currentUser={currentUser}
         />
+      )}
+
+      {activeTab === 'my-schedule' && (
+        <EmployeePortalScreen />
       )}
 
       {activeTab === 'conflicts' && (

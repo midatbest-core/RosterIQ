@@ -232,7 +232,11 @@ export const RosterCalendarScreen: React.FC<RosterCalendarScreenProps> = ({
         viewMode={viewMode}
         onViewModeChange={(mode) => {
           setViewMode(mode);
-          setFilterId('');
+          if (isPodLead) {
+            setFilterId(mode === 'employee' ? (currentUser?.employee_id || '') : (currentUser?.pod_id || ''));
+          } else {
+            setFilterId('');
+          }
         }}
         timeScope={timeScope}
         onTimeScopeChange={setTimeScope}

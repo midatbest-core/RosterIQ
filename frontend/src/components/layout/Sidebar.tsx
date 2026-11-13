@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   BarChart3,
+  UserCheck,
 } from 'lucide-react';
 import { User } from '../../services/types';
 import { RosterIQLogo } from '../brand/RosterIQLogo';
@@ -25,6 +26,7 @@ export type NavTab =
   | 'analytics'
   | 'requests'
   | 'roster'
+  | 'my-schedule'
   | 'conflicts'
   | 'allocation-log'
   | 'employees'
@@ -68,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           group: 'POD SCHEDULE',
           items: [
             { id: 'roster' as NavTab, label: 'Pod Calendar', icon: Calendar },
+            { id: 'my-schedule' as NavTab, label: 'My Allocation', icon: UserCheck },
             {
               id: 'conflicts' as NavTab,
               label: 'Pod Conflicts',

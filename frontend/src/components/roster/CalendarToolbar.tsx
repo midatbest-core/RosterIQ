@@ -65,7 +65,10 @@ export const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
   const isPodLead = currentUser?.role === 'POD_LEAD';
 
   const views: { id: RosterViewMode; label: string; icon: React.FC<{ className?: string }> }[] = isPodLead
-    ? [{ id: 'pod', label: 'Pod Work Distribution', icon: Network }]
+    ? [
+        { id: 'pod', label: 'Pod Team Allocation', icon: Network },
+        { id: 'employee', label: 'My Personal Allocation', icon: UserCheck },
+      ]
     : [
         { id: 'company', label: 'Company-Wide', icon: Users },
         { id: 'pod', label: 'Pod-Wise', icon: Network },
