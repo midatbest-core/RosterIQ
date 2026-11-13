@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 import uuid
 
 import pytest
@@ -1184,3 +1184,106 @@ def test_atomic_cascading_bundle_connected_graph(base_setup):
     assert independent_bundle.brand_process_ids == [bp_z]
     assert len(independent_bundle.changes) == 1
     assert independent_bundle.changes[0].employee_id == emp3_id
+
+
+def test_decomposed_multi_date_resolver_preserves_clean_dates(base_setup):
+    """
+    Validates targeted date decomposition:
+    - Roster covers d1 and d2.
+    - d1 is completely valid with existing allocations (0 conflicts).
+    - d2 has an uncovered demand slot (1 conflict).
+    - Resolver decomposes solve: d1 is preserved 100% untouched with 0 churn.
+    - Only d2 generates resolution bundles.
+    """
+    d1 = base_setup["d1"]
+    d2 = d1 + timedelta(days=1)
+    pod = base_setup["pod_a"]
+    proc_cs = base_setup["proc_support"]
+    bp_cs = base_setup["bp_support"]
+
+    emp1_id = uuid.uuid4()
+    emp1 = EmployeeSpec(
+        id=emp1_id,
+        name="Employee 1",
+        email="emp1@test.com",
+        pod_id=pod,
+        skill_process_ids=(proc_cs,),
+        daily_capacity_minutes=540,
+        standard_start_time=time(9, 0),
+        standard_end_time=time(18, 0),
+    )
+
+    slot_d1 = DemandSlot(
+        brand_process_id=bp_cs,
+        brand_id=uuid.uuid4(),
+        process_id=proc_cs,
+        date=d1,
+        interval=TimeInterval(time(9, 0), time(18, 0)),
+        required_staff=1,
+        is_operating=True,
+        resolution_source="TEST",
+    )
+    slot_d2 = DemandSlot(
+        brand_process_id=bp_cs,
+        brand_id=slot_d1.brand_id,
+        process_id=proc_cs,
+        date=d2,
+        interval=TimeInterval(time(9, 0), time(18, 0)),
+        required_staff=1,
+        is_operating=True,
+        resolution_source="TEST",
+    )
+
+    # d1 has an existing allocation
+    alloc_d1 = ScheduledAllocation(
+        id=uuid.uuid4(),
+        employee_id=emp1_id,
+        brand_process_id=bp_cs,
+        date=d1,
+        interval=TimeInterval(time(9, 0), time(18, 0)),
+        allocation_type=AllocationType.PRIMARY,
+        is_cross_pod_approved=False,
+    )
+    shift_d1 = ScheduledShift(
+        id=uuid.uuid4(),
+        employee_id=emp1_id,
+        date=d1,
+        interval=TimeInterval(time(9, 0), time(18, 0)),
+        is_working_day=True,
+    )
+
+    brand_processes = [(bp_cs, slot_d1.brand_id, proc_cs)]
+    patterns = {
+        bp_cs: OperatingPatternSpec(bp_cs, (0, 1, 2, 3, 4), time(9, 0), time(18, 0), 1, 0),
+    }
+
+    result = AutomatedConflictResolver.solve(
+        target_dates=[d1, d2],
+        demand_slots=[slot_d1, slot_d2],
+        employees={emp1_id: emp1},
+        patterns=patterns,
+        overrides={},
+        company_holidays=set(),
+        primary_assignments=[],
+        unavailabilities={},
+        preferences={},
+        existing_allocations=[alloc_d1],
+        existing_shifts=[shift_d1],
+        brand_processes=brand_processes,
+        bp_pod_map={bp_cs: pod},
+        time_limit_seconds=5.0,
+    )
+
+    assert result.overall_status in (ResolverStatus.OPTIMAL, ResolverStatus.FEASIBLE)
+    assert result.final_covered_positions == 2
+    # Only d2 needed resolution! d1 must have 0 bundles!
+    affected_dates = {b.target_date for b in result.resolution_bundles}
+    assert d1 not in affected_dates
+    assert d2 in affected_dates
+    assert len(result.resolution_bundles) == 1
+    # Verify d1 allocation is preserved identical
+    d1_allocs = [a for a in result.proposed_allocations if a.date == d1]
+    assert len(d1_allocs) == 1
+    assert d1_allocs[0].employee_id == emp1_id
+    assert d1_allocs[0].id == alloc_d1.id
+

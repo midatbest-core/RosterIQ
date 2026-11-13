@@ -2300,16 +2300,29 @@ def apply_conflict_resolutions(
     applied_changes_count = 0
     now = datetime.now(timezone.utc)
 
+    # In-memory caches to eliminate WAN roundtrips on database operations
+    existing_shifts_map: dict[tuple[uuid.UUID, date], EmployeeShift] = {
+        (s.employee_id, s.date): s
+        for s in db.scalars(select(EmployeeShift).where(EmployeeShift.roster_id == target_roster.id)).all()
+    }
+    emp_records: dict[uuid.UUID, Employee] = {
+        e.id: e for e in db.scalars(select(Employee)).all()
+    }
+    alloc_by_id: dict[uuid.UUID, RosterAllocation] = {
+        a.id: a
+        for a in db.scalars(select(RosterAllocation).where(RosterAllocation.roster_id == target_roster.id)).all()
+    }
+    alloc_by_slot: dict[tuple[date, uuid.UUID, uuid.UUID], RosterAllocation] = {
+        (a.date, a.brand_process_id, a.employee_id): a for a in alloc_by_id.values()
+    }
+    alloc_by_date_bp: dict[tuple[date, uuid.UUID], RosterAllocation] = {
+        (a.date, a.brand_process_id): a for a in alloc_by_id.values()
+    }
+
     def get_or_create_shift(emp_id: uuid.UUID, alloc_date: date, alloc_interval: TimeInterval) -> uuid.UUID:
-        shift = db.scalar(
-            select(EmployeeShift).where(
-                EmployeeShift.roster_id == target_roster.id,
-                EmployeeShift.employee_id == emp_id,
-                EmployeeShift.date == alloc_date,
-            )
-        )
+        shift = existing_shifts_map.get((emp_id, alloc_date))
         if not shift:
-            emp_rec = db.get(Employee, emp_id)
+            emp_rec = emp_records.get(emp_id)
             s_start = emp_rec.standard_start_time if emp_rec else alloc_interval.start_time
             s_end = emp_rec.standard_end_time if emp_rec else alloc_interval.end_time
             shift = EmployeeShift(
@@ -2322,7 +2335,7 @@ def apply_conflict_resolutions(
                 is_working_day=True,
             )
             db.add(shift)
-            db.flush()
+            existing_shifts_map[(emp_id, alloc_date)] = shift
         return shift.id
 
     # Apply changes transactionally
@@ -2346,21 +2359,18 @@ def apply_conflict_resolutions(
                     approved_at=now if ch.is_cross_pod else None,
                 )
                 db.add(new_alloc)
+                alloc_by_id[new_alloc.id] = new_alloc
+                alloc_by_slot[(ch.date, ch.brand_process_id, ch.employee_id)] = new_alloc
+                alloc_by_date_bp[(ch.date, ch.brand_process_id)] = new_alloc
                 applied_changes_count += 1
 
             elif ch.action_type in (ActionType.REASSIGN_ALLOCATION, ActionType.MOVE_ALLOCATION):
                 # Look up existing allocation
                 existing = None
                 if ch.allocation_id:
-                    existing = db.get(RosterAllocation, ch.allocation_id)
+                    existing = alloc_by_id.get(ch.allocation_id)
                 if not existing:
-                    existing = db.scalar(
-                        select(RosterAllocation).where(
-                            RosterAllocation.roster_id == target_roster.id,
-                            RosterAllocation.date == ch.date,
-                            RosterAllocation.brand_process_id == ch.brand_process_id,
-                        )
-                    )
+                    existing = alloc_by_date_bp.get((ch.date, ch.brand_process_id))
                 if existing:
                     s_id = get_or_create_shift(ch.employee_id, ch.date, ch.interval)
                     existing.shift_id = s_id
@@ -2378,18 +2388,13 @@ def apply_conflict_resolutions(
             elif ch.action_type == ActionType.REMOVE_ALLOCATION:
                 existing = None
                 if ch.allocation_id:
-                    existing = db.get(RosterAllocation, ch.allocation_id)
+                    existing = alloc_by_id.get(ch.allocation_id)
                 if not existing:
-                    existing = db.scalar(
-                        select(RosterAllocation).where(
-                            RosterAllocation.roster_id == target_roster.id,
-                            RosterAllocation.date == ch.date,
-                            RosterAllocation.brand_process_id == ch.brand_process_id,
-                            RosterAllocation.employee_id == ch.employee_id,
-                        )
-                    )
+                    existing = alloc_by_slot.get((ch.date, ch.brand_process_id, ch.employee_id))
                 if existing:
                     db.delete(existing)
+                    alloc_by_id.pop(existing.id, None)
+                    alloc_by_slot.pop((ch.date, ch.brand_process_id, ch.employee_id), None)
                     applied_changes_count += 1
 
     db.flush()

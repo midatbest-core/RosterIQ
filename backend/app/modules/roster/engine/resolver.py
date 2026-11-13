@@ -253,6 +253,163 @@ class AutomatedConflictResolver:
         )
         initial_uncovered = max(0, total_required_staff_positions - initial_covered_positions)
 
+        # =========================================================================
+        # TARGETED DATE DECOMPOSITION: High-performance solve for multi-date rosters
+        # Resolves each conflicted date in milliseconds, locking clean dates.
+        # =========================================================================
+        if len(target_dates) > 1:
+            initial_conflicts = IndependentValidator.validate_roster(
+                all_dates=target_dates,
+                brand_processes=brand_processes,
+                patterns=patterns,
+                overrides=overrides,
+                company_holidays=company_holidays,
+                employees=employees,
+                unavailabilities=unavailabilities,
+                shifts=existing_shifts,
+                allocations=existing_allocations,
+            )
+            conflicted_dates = {c.date for c in initial_conflicts if c.date in target_dates}
+
+            demand_req_by_date: dict[date, int] = defaultdict(int)
+            for s in active_demand:
+                demand_req_by_date[s.date] += s.required_staff
+
+            alloc_count_by_date: dict[date, int] = defaultdict(int)
+            for a in existing_allocations:
+                if a.date in target_dates:
+                    alloc_count_by_date[a.date] += 1
+
+            for d in target_dates:
+                if alloc_count_by_date.get(d, 0) < demand_req_by_date.get(d, 0):
+                    conflicted_dates.add(d)
+
+            all_proposed_allocs: list[ScheduledAllocation] = []
+            all_proposed_shifts: list[ScheduledShift] = []
+            all_bundles: list[ResolutionBundle] = []
+            all_pass_results: list[LexicographicPassResult] = []
+            decomposed_status = ResolverStatus.OPTIMAL
+
+            for d in sorted(target_dates):
+                d_demand = [s for s in active_demand if s.date == d]
+                d_allocs = [a for a in existing_allocations if a.date == d]
+                d_shifts = [s for s in existing_shifts if s.date == d]
+
+                if d not in conflicted_dates and d_allocs:
+                    all_proposed_allocs.extend(d_allocs)
+                    all_proposed_shifts.extend(d_shifts)
+                else:
+                    per_date_limit = max(1.0, min(3.0, time_limit_seconds / max(1, len(conflicted_dates))))
+                    sub_result = cls.solve(
+                        target_dates=[d],
+                        demand_slots=d_demand,
+                        employees=employees,
+                        patterns=patterns,
+                        overrides=overrides,
+                        company_holidays=company_holidays,
+                        primary_assignments=primary_assignments,
+                        unavailabilities=unavailabilities,
+                        preferences=preferences,
+                        existing_allocations=d_allocs,
+                        existing_shifts=d_shifts,
+                        brand_processes=brand_processes,
+                        bp_pod_map=bp_pod_map,
+                        time_limit_seconds=per_date_limit,
+                        allow_cross_pod=allow_cross_pod,
+                    )
+                    if sub_result.overall_status != ResolverStatus.OPTIMAL:
+                        if sub_result.overall_status == ResolverStatus.FEASIBLE:
+                            decomposed_status = ResolverStatus.FEASIBLE
+                        elif decomposed_status != ResolverStatus.FEASIBLE:
+                            decomposed_status = sub_result.overall_status
+
+                    all_proposed_allocs.extend(sub_result.proposed_allocations)
+                    all_proposed_shifts.extend(sub_result.proposed_shifts)
+                    all_bundles.extend(sub_result.resolution_bundles)
+                    all_pass_results.extend(sub_result.pass_results)
+
+            final_validation_conflicts = IndependentValidator.validate_roster(
+                all_dates=target_dates,
+                brand_processes=brand_processes,
+                patterns=patterns,
+                overrides=overrides,
+                company_holidays=company_holidays,
+                employees=employees,
+                unavailabilities=unavailabilities,
+                shifts=all_proposed_shifts,
+                allocations=all_proposed_allocs,
+            )
+
+            covered_positions_by_slot: dict[tuple[uuid.UUID, date], int] = {}
+            for a in all_proposed_allocs:
+                covered_positions_by_slot[(a.brand_process_id, a.date)] = (
+                    covered_positions_by_slot.get((a.brand_process_id, a.date), 0) + 1
+                )
+
+            fully_satisfied_count = 0
+            partially_satisfied_count = 0
+            uncovered_count = 0
+            shortage_evidences: list[ShortageEvidence] = []
+            bp_info_map = {bp[0]: (bp[1], bp[2]) for bp in brand_processes}
+
+            for slot in active_demand:
+                cov = covered_positions_by_slot.get((slot.brand_process_id, slot.date), 0)
+                if cov == slot.required_staff:
+                    fully_satisfied_count += 1
+                elif cov > 0:
+                    partially_satisfied_count += 1
+                    shortfall = slot.required_staff - cov
+                    evidence = cls._analyze_shortage(
+                        slot=slot,
+                        assigned_count=cov,
+                        shortfall=shortfall,
+                        employees=employees,
+                        unavailabilities=unavailabilities,
+                        existing_shifts=all_proposed_shifts,
+                        bp_info_map=bp_info_map,
+                        bp_pod_map=bp_pod_map,
+                    )
+                    shortage_evidences.append(evidence)
+                else:
+                    uncovered_count += 1
+                    shortfall = slot.required_staff
+                    evidence = cls._analyze_shortage(
+                        slot=slot,
+                        assigned_count=0,
+                        shortfall=shortfall,
+                        employees=employees,
+                        unavailabilities=unavailabilities,
+                        existing_shifts=all_proposed_shifts,
+                        bp_info_map=bp_info_map,
+                        bp_pod_map=bp_pod_map,
+                    )
+                    shortage_evidences.append(evidence)
+
+            final_covered = len(all_proposed_allocs)
+            final_uncovered = max(0, total_required_staff_positions - final_covered)
+            duration_sec = (datetime.now(timezone.utc) - start_time).total_seconds()
+
+            return ResolverResult(
+                overall_status=decomposed_status,
+                pass_results=all_pass_results,
+                total_demand_slots=total_demand_slots,
+                total_required_staff_positions=total_required_staff_positions,
+                initial_covered_positions=initial_covered_positions,
+                final_covered_positions=final_covered,
+                initial_uncovered_positions=initial_uncovered,
+                final_uncovered_positions=final_uncovered,
+                fully_satisfied_demand_slots=fully_satisfied_count,
+                partially_satisfied_demand_slots=partially_satisfied_count,
+                uncovered_demand_slots=uncovered_count,
+                proposed_shifts=all_proposed_shifts,
+                proposed_allocations=all_proposed_allocs,
+                resolution_bundles=all_bundles,
+                shortage_evidences=shortage_evidences,
+                validation_conflicts=final_validation_conflicts,
+                snapshot_hash=snapshot_hash,
+                solve_duration_seconds=duration_sec,
+            )
+
         pass_results: list[LexicographicPassResult] = []
 
         # =========================================================================
@@ -610,7 +767,8 @@ class AutomatedConflictResolver:
         s1_st = status_mapping.get(s1, ResolverStatus.UNKNOWN)
         stage_statuses.append(("Stage 1: Staff Positions", s1_st.value, solver.objective_value if s1 in (cp_model.OPTIMAL, cp_model.FEASIBLE) else 0.0))
         if s1 not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return {}, LexicographicPassResult(pass_name, s1_st, (datetime.now(timezone.utc) - t0).total_seconds(), stage_statuses=tuple(stage_statuses))
+            fallback_map = {k: True for k in baseline_allocs if k in x}
+            return fallback_map, LexicographicPassResult(pass_name, s1_st, (datetime.now(timezone.utc) - t0).total_seconds(), stage_statuses=tuple(stage_statuses))
         
         best_solution_map = {k: bool(solver.value(var)) for k, var in x.items()}
 
