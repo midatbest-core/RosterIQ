@@ -52,6 +52,16 @@ def verify_csrf(request: Request) -> None:
         raise AppError("CSRF_VALIDATION_FAILED", "A valid CSRF token is required.", 403)
 
 
+def verify_csrf_for_logout(request: Request) -> None:
+    cookie_token = request.cookies.get("csrf_token")
+    header_token = request.headers.get("X-CSRF-Token")
+    if not header_token and not cookie_token:
+        raise AppError("CSRF_VALIDATION_FAILED", "A valid CSRF token is required.", 403)
+    if not header_token:
+        raise AppError("CSRF_VALIDATION_FAILED", "A valid CSRF token is required.", 403)
+
+
+
 require_manager = require_roles(UserRole.ADMIN, UserRole.OPERATIONS_MANAGER)
 require_admin = require_roles(UserRole.ADMIN)
 require_lead_or_manager = require_roles(UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.POD_LEAD)

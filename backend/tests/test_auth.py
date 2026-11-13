@@ -40,6 +40,22 @@ def test_health_and_authentication(client: TestClient, admin_user: User) -> None
     assert logged_out.status_code == 204
 
 
+def test_logout_succeeds_even_with_cross_tab_csrf_drift(client: TestClient, admin_user: User) -> None:
+    """When multiple tabs are used, tab 1 might hold an older CSRF token while the cookie jar was updated by tab 2.
+    Logout must still succeed and clear cookies without trapping the user."""
+    client.post(
+        "/api/v1/auth/login",
+        json={"email": admin_user.email, "password": "AdminPass123!"},
+    )
+    # Simulate mismatched header from a different tab
+    headers = {"X-CSRF-Token": "cross-tab-drifted-token-12345"}
+    res = client.post("/api/v1/auth/logout", headers=headers)
+    assert res.status_code == 204
+    # Cookie should be cleared
+    assert not client.cookies.get("access_token")
+
+
+
 def test_protected_endpoint_requires_authentication(client: TestClient) -> None:
     response = client.get("/api/v1/employees")
     assert response.status_code == 401

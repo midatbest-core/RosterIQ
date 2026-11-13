@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import create_access_token, new_csrf_token, verify_password
 from app.db.session import get_db
-from app.modules.auth.dependencies import get_current_user, verify_csrf
+from app.modules.auth.dependencies import get_current_user, verify_csrf, verify_csrf_for_logout
 from app.modules.auth.models import User, UserRole
 from app.modules.auth.schemas import (
     DemoLoginRequest,
@@ -62,7 +62,7 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     return LoginResponse(user=UserRead.model_validate(user), csrf_token=csrf_token)
 
 
-@router.post("/logout", status_code=204, dependencies=[Depends(verify_csrf)])
+@router.post("/logout", status_code=204, dependencies=[Depends(verify_csrf_for_logout)])
 def logout(response: Response) -> None:
     settings = get_settings()
     samesite_val = settings.effective_cookie_samesite

@@ -42,6 +42,37 @@ export const App: React.FC = () => {
     checkAuth();
   }, []);
 
+  // Multi-tab session synchronization: update current user or log out when another tab changes authentication state
+  useEffect(() => {
+    const handleStorageEvent = async (e: StorageEvent) => {
+      if (e.key === 'rosteriq_auth_event' && e.newValue) {
+        try {
+          const evt = JSON.parse(e.newValue);
+          if (evt.type === 'logout') {
+            setCurrentUser(null);
+            setSelectedRosterId('');
+            setRosters([]);
+          } else if (evt.type === 'login') {
+            const freshUser = await api.getCurrentUser();
+            if (freshUser) {
+              setCurrentUser(freshUser);
+              if (
+                freshUser.role === 'ADMIN' ||
+                freshUser.role === 'OPERATIONS_MANAGER' ||
+                freshUser.role === 'POD_LEAD'
+              ) {
+                await loadRosters();
+              }
+            }
+          }
+        } catch {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorageEvent);
+    return () => window.removeEventListener('storage', handleStorageEvent);
+  }, []);
+
   useEffect(() => {
     if (currentUser?.role === 'POD_LEAD') {
       const allowedTabs: NavTab[] = ['roster', 'my-schedule', 'analytics', 'conflicts', 'employees', 'requests'];
@@ -71,17 +102,35 @@ export const App: React.FC = () => {
       if (list.length > 0 && !selectedRosterId) {
         setSelectedRosterId(list[0].id);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load rosters:', err);
+      // In multi-tab scenarios, another tab may have switched to a role that cannot view rosters (e.g. EMPLOYEE)
+      if (
+        err?.message?.includes('permission') ||
+        err?.message?.includes('FORBIDDEN') ||
+        err?.message?.includes('403')
+      ) {
+        try {
+          const freshUser = await api.getCurrentUser();
+          if (freshUser && freshUser.role !== currentUser?.role) {
+            setCurrentUser(freshUser);
+          }
+        } catch {
+          setCurrentUser(null);
+        }
+      }
     }
   };
 
   const handleLogout = async () => {
     try {
       await api.logout();
-      setCurrentUser(null);
     } catch (err) {
-      console.error(err);
+      console.error('Logout error:', err);
+    } finally {
+      setCurrentUser(null);
+      setSelectedRosterId('');
+      setRosters([]);
     }
   };
 

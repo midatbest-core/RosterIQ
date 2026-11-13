@@ -27,15 +27,37 @@ const BASE_URL = `${API_BASE}/api/v1`;
 let inMemoryCsrfToken = '';
 
 function getCsrfToken(): string {
-  if (inMemoryCsrfToken) return inMemoryCsrfToken;
+  // 1. Check document.cookie first if accessible (always matches what browser sends for same-origin)
   try {
-    const stored = sessionStorage.getItem('rosteriq_csrf_token');
-    if (stored) return stored;
-  } catch {
-    // ignore sessionStorage access errors in restricted contexts
-  }
-  const match = document.cookie.match(new RegExp('(^| )csrf_token=([^;]+)'));
-  return match ? match[2] : '';
+    if (typeof document !== 'undefined') {
+      const match = document.cookie.match(new RegExp('(^| )csrf_token=([^;]+)'));
+      if (match && match[2]) {
+        const val = decodeURIComponent(match[2]);
+        inMemoryCsrfToken = val;
+        return val;
+      }
+    }
+  } catch {}
+
+  // 2. Check localStorage (shared across tabs on the same origin)
+  try {
+    const storedLocal = localStorage.getItem('rosteriq_csrf_token');
+    if (storedLocal) {
+      inMemoryCsrfToken = storedLocal;
+      return storedLocal;
+    }
+  } catch {}
+
+  // 3. Check sessionStorage (tab-scoped)
+  try {
+    const storedSession = sessionStorage.getItem('rosteriq_csrf_token');
+    if (storedSession) {
+      inMemoryCsrfToken = storedSession;
+      return storedSession;
+    }
+  } catch {}
+
+  return inMemoryCsrfToken || '';
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -87,9 +109,17 @@ export const api = {
       inMemoryCsrfToken = (res as any).csrf_token;
       try {
         sessionStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
+        localStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
       } catch {}
     }
-    return (res as any).user ? (res as any).user : (res as User);
+    const user = (res as any).user ? (res as any).user : (res as User);
+    try {
+      localStorage.setItem(
+        'rosteriq_auth_event',
+        JSON.stringify({ type: 'login', role: user.role, email: user.email, ts: Date.now() })
+      );
+    } catch {}
+    return user;
   },
   getDemoRoles: () => request<DemoRole[]>('/auth/demo-roles'),
   demoLogin: async (role: string): Promise<User> => {
@@ -101,9 +131,17 @@ export const api = {
       inMemoryCsrfToken = (res as any).csrf_token;
       try {
         sessionStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
+        localStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
       } catch {}
     }
-    return (res as any).user ? (res as any).user : (res as User);
+    const user = (res as any).user ? (res as any).user : (res as User);
+    try {
+      localStorage.setItem(
+        'rosteriq_auth_event',
+        JSON.stringify({ type: 'login', role: user.role, email: user.email, ts: Date.now() })
+      );
+    } catch {}
+    return user;
   },
   getPresentationDemoAccounts: () =>
     request<PresentationDemoAccount[]>('/auth/presentation-demo-accounts'),
@@ -111,10 +149,19 @@ export const api = {
   logout: async () => {
     try {
       await request<{ message: string }>('/auth/logout', { method: 'POST' });
+    } catch (err) {
+      // If server logout fails (e.g. CSRF token mismatch from another tab, 403, 401, or network drop),
+      // do not throw — proceed with complete client-side session cleanup so the user is never trapped.
+      console.warn('Server logout returned error; completing local session termination:', err);
     } finally {
       inMemoryCsrfToken = '';
       try {
         sessionStorage.removeItem('rosteriq_csrf_token');
+        localStorage.removeItem('rosteriq_csrf_token');
+        localStorage.setItem(
+          'rosteriq_auth_event',
+          JSON.stringify({ type: 'logout', ts: Date.now() })
+        );
       } catch {}
     }
   },
