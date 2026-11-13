@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: rosteriq-backend
+    runtime: python
+    region: ohio
+    plan: free
+    buildCommand: "pip install -r backend/requirements.txt"
+    startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: ROSTERIQ_ENVIRONMENT
+        value: production
+      - key: ROSTERIQ_DATABASE_URL
+        sync: false
+      - key: ROSTERIQ_JWT_SECRET
+        generateValue: true
+      - key: ROSTERIQ_ACCESS_TOKEN_MINUTES
+        value: "60"
+      - key: ROSTERIQ_COOKIE_SECURE
+        value: "true"
+      - key: ROSTERIQ_CORS_ORIGINS
+        sync: false

@@ -112,8 +112,9 @@ export function useNotifications(currentUser: User | null) {
         eventSourceRef.current = null;
       }
 
-      // Native EventSource automatically carries HTTP-only session cookies
-      const es = new EventSource('/api/v1/auth/notifications/stream');
+      // Native EventSource carries session cookies ({ withCredentials: true } ensures cross-origin cookies work if direct API URL is set)
+      const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+      const es = new EventSource(`${apiBase}/api/v1/auth/notifications/stream`, { withCredentials: true });
       eventSourceRef.current = es;
 
       es.addEventListener('connected', () => {
