@@ -196,6 +196,9 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db)) -> E
 
     employee.temporary_password = temp_pass
     employee.login_email = employee.email
+
+    from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+    employee.conflict_check = recompute_all_active_rosters_conflicts(db)
     return employee
 
 
@@ -231,6 +234,9 @@ def update_employee(employee_id: UUID, payload: EmployeeUpdate, db: Session = De
         setattr(employee, field, value)
     db.commit()
     db.refresh(employee)
+
+    from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+    employee.conflict_check = recompute_all_active_rosters_conflicts(db)
     return employee
 
 
@@ -277,6 +283,8 @@ def replace_employee_skills(
         [EmployeeProcessSkill(employee_id=employee_id, **skill.model_dump()) for skill in payload.skills]
     )
     db.commit()
+    from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+    recompute_all_active_rosters_conflicts(db)
     return list(
         db.scalars(select(EmployeeProcessSkill).where(EmployeeProcessSkill.employee_id == employee_id)).all()
     )

@@ -66,6 +66,18 @@ export const GenerateRosterModal: React.FC<GenerateRosterModalProps> = ({
     { value: 12, label: 'December' },
   ];
 
+  const updateMonth = (newMonth: number) => {
+    setMonth(newMonth);
+    const mLabel = months.find((m) => m.value === newMonth)?.label || '';
+    setName(`${mLabel} ${year} Production Roster`);
+  };
+
+  const updateYear = (newYear: number) => {
+    setYear(newYear);
+    const mLabel = months.find((m) => m.value === month)?.label || '';
+    setName(`${mLabel} ${newYear} Production Roster`);
+  };
+
   return (
     <Modal
       isOpen={isOpen}
@@ -105,7 +117,7 @@ export const GenerateRosterModal: React.FC<GenerateRosterModalProps> = ({
                 </label>
                 <select
                   value={month}
-                  onChange={(e) => setMonth(Number(e.target.value))}
+                  onChange={(e) => updateMonth(Number(e.target.value))}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-hidden focus:border-indigo-500"
                 >
                   {months.map((m) => (
@@ -123,7 +135,7 @@ export const GenerateRosterModal: React.FC<GenerateRosterModalProps> = ({
                 <input
                   type="number"
                   value={year}
-                  onChange={(e) => setYear(Number(e.target.value))}
+                  onChange={(e) => updateYear(Number(e.target.value))}
                   min={2024}
                   max={2030}
                   required

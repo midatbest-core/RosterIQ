@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 import calendar
 import csv
 from datetime import date, datetime, time, timezone
@@ -158,7 +159,8 @@ def generate_roster(
 
     bps = db.scalars(
         select(BrandProcess)
-        .where(BrandProcess.is_active == True)
+        .join(Brand, BrandProcess.brand_id == Brand.id)
+        .where(BrandProcess.is_active == True, Brand.status == RecordStatus.ACTIVE)
     ).all()
     bp_list = [(bp.id, bp.brand_id, bp.process_id) for bp in bps]
 
@@ -274,17 +276,16 @@ def generate_roster(
         allocations=result.allocations,
     )
 
-    # Combine conflicts (deduplicated by type, date, bp_id, emp_id)
+    # Fast O(1) set-based conflict deduplication
     all_conflicts = list(result.conflicts)
+    seen_conflict_keys = {
+        (c.conflict_type, c.date, c.brand_process_id, c.employee_id)
+        for c in all_conflicts
+    }
     for vc in validation_conflicts:
-        exists = any(
-            c.conflict_type == vc.conflict_type
-            and c.date == vc.date
-            and c.brand_process_id == vc.brand_process_id
-            and c.employee_id == vc.employee_id
-            for c in all_conflicts
-        )
-        if not exists:
+        key = (vc.conflict_type, vc.date, vc.brand_process_id, vc.employee_id)
+        if key not in seen_conflict_keys:
+            seen_conflict_keys.add(key)
             all_conflicts.append(vc)
 
     # Determine status: VALIDATED if 0 hard violations, else DRAFT
@@ -299,9 +300,20 @@ def generate_roster(
 
     current_hash = compute_config_hash(db)
 
+    # Auto-sync roster name with selected month to prevent stale "November" label for December
+    roster_name = payload.name
+    month_names = {
+        1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+        7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December"
+    }
+    target_month_name = month_names.get(payload.month, "")
+    for m_idx, m_name in month_names.items():
+        if m_idx != payload.month and m_name in roster_name:
+            roster_name = roster_name.replace(m_name, target_month_name)
+
     roster = Roster(
         id=uuid.uuid4(),
-        name=payload.name,
+        name=roster_name,
         month=payload.month,
         year=payload.year,
         version=version,
@@ -312,10 +324,9 @@ def generate_roster(
     db.add(roster)
     db.flush()
 
-    # Persist Shifts
-    shift_entity_map: dict[tuple[uuid.UUID, date], uuid.UUID] = {}
-    for s in result.shifts:
-        shift_entity = EmployeeShift(
+    # Batch persist Shifts
+    shift_entities = [
+        EmployeeShift(
             id=s.id,
             roster_id=roster.id,
             employee_id=s.employee_id,
@@ -324,35 +335,41 @@ def generate_roster(
             end_time=s.interval.end_time,
             is_working_day=s.is_working_day,
         )
-        db.add(shift_entity)
-        shift_entity_map[(s.employee_id, s.date)] = s.id
-
+        for s in result.shifts
+    ]
+    db.add_all(shift_entities)
+    shift_entity_map: dict[tuple[uuid.UUID, date], uuid.UUID] = {
+        (s.employee_id, s.date): s.id for s in result.shifts
+    }
     db.flush()
 
-    # Persist Allocations
+    # Batch persist Allocations
+    alloc_entities = []
     for a in result.allocations:
         shift_id = shift_entity_map.get((a.employee_id, a.date))
         if not shift_id:
             continue
-        alloc_entity = RosterAllocation(
-            id=a.id,
-            roster_id=roster.id,
-            shift_id=shift_id,
-            employee_id=a.employee_id,
-            brand_process_id=a.brand_process_id,
-            date=a.date,
-            start_time=a.interval.start_time,
-            end_time=a.interval.end_time,
-            allocation_type=AllocationType(a.allocation_type.value),
-            reassigned_from_employee_id=a.reassigned_from_employee_id,
-            is_cross_pod_approved=a.is_cross_pod_approved,
-            reassignment_reason=a.notes,
+        alloc_entities.append(
+            RosterAllocation(
+                id=a.id,
+                roster_id=roster.id,
+                shift_id=shift_id,
+                employee_id=a.employee_id,
+                brand_process_id=a.brand_process_id,
+                date=a.date,
+                start_time=a.interval.start_time,
+                end_time=a.interval.end_time,
+                allocation_type=AllocationType(a.allocation_type.value),
+                reassigned_from_employee_id=a.reassigned_from_employee_id,
+                is_cross_pod_approved=a.is_cross_pod_approved,
+                reassignment_reason=a.notes,
+            )
         )
-        db.add(alloc_entity)
+    db.add_all(alloc_entities)
 
-    # Persist Conflicts
-    for c in all_conflicts:
-        conf_entity = RosterConflict(
+    # Batch persist Conflicts
+    conf_entities = [
+        RosterConflict(
             id=uuid.uuid4(),
             roster_id=roster.id,
             date=c.date,
@@ -365,7 +382,9 @@ def generate_roster(
             description=c.description,
             is_resolved=False,
         )
-        db.add(conf_entity)
+        for c in all_conflicts
+    ]
+    db.add_all(conf_entities)
 
     db.commit()
 
@@ -674,9 +693,9 @@ def get_roster_grid(
         shifts = [s for s in shifts if s.employee_id in pod_emp_ids]
         allocs = [a for a in allocs if a.employee_id in pod_emp_ids]
         if view_type == "employee":
-            if filter_id and filter_id in pod_emp_ids:
+            if filter_id and (filter_id in pod_emp_ids or filter_id in employees):
                 pass
-            elif _user.employee_id and _user.employee_id in pod_emp_ids:
+            elif _user.employee_id:
                 filter_id = _user.employee_id
             else:
                 filter_id = None
@@ -686,9 +705,14 @@ def get_roster_grid(
     if view_type in ("company", "employee", "pod"):
         target_employees = list(employees.values())
         if _user.role == UserRole.POD_LEAD and _user.pod_id:
-            target_employees = [e for e in target_employees if e.pod_id == _user.pod_id]
-            if view_type == "employee" and filter_id:
-                target_employees = [e for e in target_employees if e.id == filter_id]
+            if view_type == "employee":
+                effective_emp_id = filter_id or _user.employee_id
+                if effective_emp_id and effective_emp_id in employees:
+                    target_employees = [employees[effective_emp_id]]
+                else:
+                    target_employees = [e for e in target_employees if e.pod_id == _user.pod_id]
+            else:
+                target_employees = [e for e in target_employees if e.pod_id == _user.pod_id]
         elif view_type == "pod" and filter_id:
             target_employees = [e for e in target_employees if e.pod_id == filter_id]
         elif view_type == "employee" and filter_id:
@@ -1868,7 +1892,11 @@ def _load_solver_inputs(roster: Roster, db: Session):
     num_days = calendar.monthrange(roster.year, roster.month)[1]
     target_dates = [date(roster.year, roster.month, d) for d in range(1, num_days + 1)]
 
-    bps = db.scalars(select(BrandProcess).where(BrandProcess.is_active == True)).all()
+    bps = db.scalars(
+        select(BrandProcess)
+        .join(Brand, BrandProcess.brand_id == Brand.id)
+        .where(BrandProcess.is_active == True, Brand.status == RecordStatus.ACTIVE)
+    ).all()
     bp_list = [(bp.id, bp.brand_id, bp.process_id) for bp in bps]
 
     patterns = db.scalars(select(OperatingPattern)).all()
@@ -2498,6 +2526,18 @@ def apply_conflict_resolutions(
         validation_conflicts_count=len(val_conflicts),
         applied_at=now,
     )
+
+
+@router.post("/revalidate-all")
+def revalidate_all_rosters(
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_manager),
+) -> dict[str, Any]:
+    """
+    Recomputes conflicts across all active rosters using current database state.
+    """
+    from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+    return recompute_all_active_rosters_conflicts(db)
 
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from datetime import date
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -87,6 +88,7 @@ class BrandProcessRead(BrandProcessBase):
 
     id: UUID
     is_active: bool
+    conflict_check: dict[str, Any] | None = None
 
 
 class PrimaryAssignmentBase(BaseModel):
@@ -118,5 +120,6 @@ class PrimaryAssignmentRead(PrimaryAssignmentBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    conflict_check: dict[str, Any] | None = None
     is_active: bool
 

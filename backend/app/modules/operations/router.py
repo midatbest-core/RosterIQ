@@ -105,7 +105,7 @@ def get_brand_operating_schedule(brand_id: UUID, db: Session = Depends(get_db)):
     from app.modules.workforce.models import Pod
 
     bps = db.scalars(
-        select(BrandProcess).where(BrandProcess.brand_id == brand_id, BrandProcess.is_active == True)
+        select(BrandProcess).where(BrandProcess.brand_id == brand_id)
     ).all()
 
     processes_data = []
@@ -195,6 +195,13 @@ def update_brand(brand_id: UUID, payload: BrandUpdate, db: Session = Depends(get
         setattr(brand, field, value)
     db.commit()
     db.refresh(brand)
+    try:
+        from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+        check_summary = recompute_all_active_rosters_conflicts(db)
+        db.commit()
+        brand.conflict_check = check_summary
+    except Exception:
+        pass
     return brand
 
 
@@ -309,6 +316,9 @@ def create_brand_process(payload: BrandProcessCreate, db: Session = Depends(get_
     db.add(default_pattern)
     db.commit()
     db.refresh(item)
+
+    from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+    item.conflict_check = recompute_all_active_rosters_conflicts(db)
     return item
 
 
@@ -332,6 +342,13 @@ def update_brand_process(
         setattr(item, field, value)
     db.commit()
     db.refresh(item)
+    try:
+        from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+        check_summary = recompute_all_active_rosters_conflicts(db)
+        db.commit()
+        item.conflict_check = check_summary
+    except Exception:
+        pass
     return item
 
 
@@ -413,6 +430,9 @@ def create_assignment(
     db.add(assignment)
     db.commit()
     db.refresh(assignment)
+
+    from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+    assignment.conflict_check = recompute_all_active_rosters_conflicts(db)
     return assignment
 
 

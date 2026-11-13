@@ -88,15 +88,27 @@ def me(user: User = Depends(get_current_user)) -> User:
 def _get_reference_status(db: Session, ref_type: str | None, ref_id: uuid.UUID | None) -> str | None:
     if not ref_type or not ref_id:
         return None
+    raw_status = None
     if ref_type == "employee_availability_request":
         from app.modules.workforce.request_models import EmployeeAvailabilityRequest
         req = db.get(EmployeeAvailabilityRequest, ref_id)
-        return req.status if req else None
+        raw_status = req.status if req else None
     elif ref_type == "brand_change_request":
         from app.modules.operations.request_models import BrandChangeRequest
         req = db.get(BrandChangeRequest, ref_id)
-        return req.status if req else None
-    return None
+        raw_status = req.status if req else None
+
+    if not raw_status:
+        return None
+
+    # Strictly normalize status display: only show ACCEPTED, REJECTED, or UNDER REVIEW
+    s = str(raw_status).upper()
+    if s in ("APPROVED", "IMPLEMENTED", "ROSTER_PENDING", "ACCEPTED"):
+        return "ACCEPTED"
+    elif s in ("REJECTED",):
+        return "REJECTED"
+    else:
+        return "UNDER_REVIEW"
 
 
 @router.get("/notifications")

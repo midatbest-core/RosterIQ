@@ -92,7 +92,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   const currentRoster = rosters.find((r) => r.id === selectedRosterId);
 
   return (
-    <header className="relative h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between z-50 shrink-0">
+    <header className="relative h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between z-[9999] shrink-0">
       {/* Breadcrumb & Title */}
       <div className="flex flex-col">
         <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">

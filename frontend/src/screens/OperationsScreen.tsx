@@ -29,14 +29,17 @@ import {
   ExternalLink,
   Sun,
   AlertTriangle,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface OperationsScreenProps {
   initialSubTab?: 'brands' | 'assignments';
+  onNavigateToConflicts?: () => void;
 }
 
 export const OperationsScreen: React.FC<OperationsScreenProps> = ({
   initialSubTab = 'brands',
+  onNavigateToConflicts,
 }) => {
   const [subTab, setSubTab] = useState<'brands' | 'assignments'>(initialSubTab);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -83,6 +86,14 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
   // Credentials Distribution State
   const [createdCreds, setCreatedCreds] = useState<CreatedCredentials | null>(null);
   const [showCredsModal, setShowCredsModal] = useState(false);
+
+  // Conflict Check Notification State
+  const [conflictNotification, setConflictNotification] = useState<{
+    title: string;
+    message: string;
+    total_conflicts: number;
+    hard_conflicts: number;
+  } | null>(null);
 
   const handleOpenBrandSchedule = async (brand: Brand) => {
     setSelectedBrandForModal(brand);
@@ -203,9 +214,19 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
     e.preventDefault();
     try {
       setLoading(true);
-      await api.createBrandProcess(selectedBrandId, selectedProcessId);
+      const res = await api.createBrandProcess(selectedBrandId, selectedProcessId);
       setShowAddBp(false);
       await loadOperationsData();
+      if (res.conflict_check) {
+        const b = brands.find((brand) => brand.id === selectedBrandId);
+        const p = processes.find((proc) => proc.id === selectedProcessId);
+        setConflictNotification({
+          title: `Linked ${b?.name || 'Brand'} with ${p?.name || 'Process'}`,
+          message: res.conflict_check.message,
+          total_conflicts: res.conflict_check.total_conflicts,
+          hard_conflicts: res.conflict_check.hard_conflicts,
+        });
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to link brand with process');
     } finally {
@@ -217,7 +238,7 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
     e.preventDefault();
     try {
       setLoading(true);
-      await api.createAssignment({
+      const res = await api.createAssignment({
         employee_id: assignEmpId,
         brand_process_id: assignBpId,
         effective_from: effectiveFrom,
@@ -225,6 +246,15 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
       });
       setShowAddAssignment(false);
       await loadOperationsData();
+      if (res.conflict_check) {
+        const emp = employees.find((e) => e.id === assignEmpId);
+        setConflictNotification({
+          title: `Primary Assignment Created for ${emp?.name || 'Employee'}`,
+          message: res.conflict_check.message,
+          total_conflicts: res.conflict_check.total_conflicts,
+          hard_conflicts: res.conflict_check.hard_conflicts,
+        });
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to create assignment');
     } finally {
@@ -864,7 +894,77 @@ export const OperationsScreen: React.FC<OperationsScreenProps> = ({
         isOpen={showCredsModal}
         onClose={() => setShowCredsModal(false)}
         credentials={createdCreds}
+        onOpenConflicts={onNavigateToConflicts}
       />
+
+      {/* Conflict Check Feedback Modal */}
+      {conflictNotification && (
+        <Modal
+          isOpen={!!conflictNotification}
+          onClose={() => setConflictNotification(null)}
+          title="Automatic Conflict Check Complete"
+          subtitle={conflictNotification.title}
+          maxWidth="md"
+        >
+          <div className="space-y-4 p-1">
+            <div className={`p-4 rounded-xl border flex items-start gap-3 ${
+              conflictNotification.total_conflicts > 0
+                ? 'bg-amber-50 border-amber-200 text-amber-950'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-950'
+            }`}>
+              <div className={`p-2 rounded-lg shrink-0 ${
+                conflictNotification.total_conflicts > 0
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-emerald-100 text-emerald-700'
+              }`}>
+                {conflictNotification.total_conflicts > 0 ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5" />
+                )}
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold">
+                  {conflictNotification.total_conflicts === 0
+                    ? '✓ No Conflicts Detected'
+                    : `⚠️ ${conflictNotification.total_conflicts} Conflict(s) Detected (${conflictNotification.hard_conflicts} Hard Violations)`}
+                </h4>
+                <p className="text-xs leading-relaxed opacity-90">
+                  {conflictNotification.message}
+                </p>
+                {conflictNotification.total_conflicts > 0 && (
+                  <p className="text-[11px] text-amber-800 font-medium pt-1">
+                    Newly linked operational processes introduce minimum staffing demands and shift coverage requirements into active rosters.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConflictNotification(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
+              {conflictNotification.total_conflicts > 0 && onNavigateToConflicts && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConflictNotification(null);
+                    onNavigateToConflicts();
+                  }}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>Open Conflict Resolver</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

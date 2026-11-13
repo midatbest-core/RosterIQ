@@ -175,13 +175,17 @@ export const EmployeePortalScreen: React.FC = () => {
   };
 
   // Helper: check shift for date (omitted if approved leave)
-  const getShiftForDate = (dateStr: string) => {
+  const getShiftsForDate = (dateStr: string) => {
     const leave = getLeaveForDate(dateStr);
     if (leave.isLeave) {
-      // Do not display shift on approved leave dates
-      return null;
+      return [];
     }
-    return tasks.find((t) => t.date === dateStr) || null;
+    return tasks.filter((t) => t.date === dateStr);
+  };
+
+  const getShiftForDate = (dateStr: string) => {
+    const list = getShiftsForDate(dateStr);
+    return list.length > 0 ? list[0] : null;
   };
 
   // Helper: get 7 days of the week containing the base date (Mon - Sun)
@@ -757,9 +761,8 @@ export const EmployeePortalScreen: React.FC = () => {
               </button>
 
               <div className="text-center">
-                <span className="text-sm font-bold text-white block">{selectedDateFormatted}</span>
-                <span className="text-[11px] text-slate-400">
-                  {isSelectedToday ? '★ Today' : `Date: ${selectedDate}`}
+                <span className="text-xs font-semibold text-slate-300">
+                  Step single day forward/backward
                 </span>
               </div>
 
@@ -799,10 +802,10 @@ export const EmployeePortalScreen: React.FC = () => {
                   <CalendarOff className="w-3.5 h-3.5 text-amber-400" />
                   <span>Approved Leave: {selectedLeave.reason}</span>
                 </span>
-              ) : selectedShift ? (
+              ) : getShiftsForDate(selectedDate).length > 0 ? (
                 <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Confirmed Working Shift</span>
+                  <span>Confirmed Working Shift ({getShiftsForDate(selectedDate).length} slot{getShiftsForDate(selectedDate).length > 1 ? 's' : ''})</span>
                 </span>
               ) : (
                 <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1.5">
@@ -841,40 +844,44 @@ export const EmployeePortalScreen: React.FC = () => {
                 * Active shift allocation is suspended during approved leave. No company shifts are assigned to you on this date.
               </p>
             </div>
-          ) : selectedShift ? (
-            /* Scheduled Working Shift Presentation */
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Briefcase className="w-3.5 h-3.5 text-indigo-400" /> Company & Brand
-                </span>
-                <p className="text-base font-bold text-white pt-1">{selectedShift.brand_name}</p>
-                <p className="text-xs text-indigo-300 font-medium">{selectedShift.process_name}</p>
-              </div>
+          ) : getShiftsForDate(selectedDate).length > 0 ? (
+            /* Scheduled Working Shift Presentation: Supports multiple allocations per day */
+            <div className="space-y-3">
+              {getShiftsForDate(selectedDate).map((shift, idx) => (
+                <div key={shift.id || idx} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl bg-slate-950/80 border border-slate-800">
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Briefcase className="w-3.5 h-3.5 text-indigo-400" /> Company & Brand
+                    </span>
+                    <p className="text-base font-bold text-white pt-1">{shift.brand_name}</p>
+                    <p className="text-xs text-indigo-300 font-medium">{shift.process_name}</p>
+                  </div>
 
-              <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-indigo-400" /> Shift Hours
-                </span>
-                <p className="text-base font-bold text-white font-mono pt-1">
-                  {selectedShift.start_time.slice(0, 5)} - {selectedShift.end_time.slice(0, 5)}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {Math.round((profile?.daily_capacity_minutes || 540) / 60)} hours standard allocation
-                </p>
-              </div>
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-indigo-400" /> Shift Hours
+                    </span>
+                    <p className="text-base font-bold text-white font-mono pt-1">
+                      {shift.start_time.slice(0, 5)} - {shift.end_time.slice(0, 5)}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Standard working allocation
+                    </p>
+                  </div>
 
-              <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-indigo-400" /> Assignment Role
-                </span>
-                <p className="text-base font-bold text-white pt-1 capitalize">
-                  {selectedShift.allocation_type.replace(/_/g, ' ')}
-                </p>
-                <span className="text-xs text-emerald-400 font-medium">
-                  {selectedShift.roster_name || 'Published Roster'}
-                </span>
-              </div>
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-indigo-400" /> Assignment Role
+                    </span>
+                    <p className="text-base font-bold text-white pt-1 capitalize">
+                      {shift.allocation_type.replace(/_/g, ' ')}
+                    </p>
+                    <span className="text-xs text-emerald-400 font-medium">
+                      {shift.roster_name || 'Production Roster'}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             /* Rest Day / Weekly Off Presentation */

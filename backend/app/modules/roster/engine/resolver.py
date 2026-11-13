@@ -299,7 +299,7 @@ class AutomatedConflictResolver:
                     all_proposed_allocs.extend(d_allocs)
                     all_proposed_shifts.extend(d_shifts)
                 else:
-                    per_date_limit = max(1.0, min(3.0, time_limit_seconds / max(1, len(conflicted_dates))))
+                    per_date_limit = max(0.15, min(0.8, time_limit_seconds / max(1, len(conflicted_dates))))
                     sub_result = cls.solve(
                         target_dates=[d],
                         demand_slots=d_demand,
@@ -738,8 +738,8 @@ class AutomatedConflictResolver:
         # Adapt stage budget dynamically based on available time:
         # Give Stage 1 (coverage) and Stage 4 (churn minimization) higher proportional budgets
         # to ensure feasible continuity and prevent timeout churn.
-        total_budget = max(2.0, time_limit_seconds)
-        stage_budget = max(1.0, total_budget / 4.0)
+        total_budget = max(0.1, time_limit_seconds)
+        stage_budget = max(0.04, total_budget / 5.0)
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = float(stage_budget)
         solver.parameters.num_workers = 4

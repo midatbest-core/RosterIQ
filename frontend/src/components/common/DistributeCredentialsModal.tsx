@@ -1,18 +1,20 @@
 import React, { useState } from 'react';
 import { Modal } from './Modal';
 import { CreatedCredentials } from '../../services/types';
-import { KeyRound, Copy, Check, ShieldCheck, Mail, Lock, User, Layers, CheckCircle2 } from 'lucide-react';
+import { KeyRound, Copy, Check, ShieldCheck, Mail, Lock, User, Layers, CheckCircle2, AlertTriangle, ShieldAlert } from 'lucide-react';
 
 interface DistributeCredentialsModalProps {
   isOpen: boolean;
   onClose: () => void;
   credentials: CreatedCredentials | null;
+  onOpenConflicts?: () => void;
 }
 
 export const DistributeCredentialsModal: React.FC<DistributeCredentialsModalProps> = ({
   isOpen,
   onClose,
   credentials,
+  onOpenConflicts,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -113,6 +115,50 @@ Login URL: ${loginUrl}
           </div>
         </div>
 
+        {/* Automatic Conflict Check Status */}
+        {credentials.conflict_check && (
+          <div className={`p-3 rounded-xl border flex items-start justify-between gap-3 ${
+            credentials.conflict_check.total_conflicts > 0
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}>
+            <div className="flex items-start gap-2.5">
+              <div className={`p-1.5 rounded-lg shrink-0 ${
+                credentials.conflict_check.total_conflicts > 0
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-emerald-100 text-emerald-700'
+              }`}>
+                {credentials.conflict_check.total_conflicts > 0 ? (
+                  <AlertTriangle className="w-4 h-4" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+              </div>
+              <div>
+                <h5 className="text-xs font-bold">
+                  Automatic Conflict Check: {credentials.conflict_check.total_conflicts === 0 ? 'Passed (0 Conflicts)' : `${credentials.conflict_check.total_conflicts} Conflict(s) Detected`}
+                </h5>
+                <p className="text-[11px] mt-0.5 leading-relaxed opacity-90">
+                  {credentials.conflict_check.message}
+                </p>
+              </div>
+            </div>
+            {credentials.conflict_check.total_conflicts > 0 && onOpenConflicts && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenConflicts();
+                }}
+                className="shrink-0 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>Resolve</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Buttons */}
         <div className="pt-2 flex items-center gap-2">
           <button
@@ -144,3 +190,4 @@ Login URL: ${loginUrl}
     </Modal>
   );
 };
+

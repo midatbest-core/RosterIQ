@@ -131,7 +131,26 @@ def get_employee_tasks(
     if not user.employee_id:
         raise AppError("FORBIDDEN", "User is not linked to any employee record.", 403)
 
+    target_rosters_q = select(Roster)
+    if month:
+        target_rosters_q = target_rosters_q.where(Roster.month == month)
+    if year:
+        target_rosters_q = target_rosters_q.where(Roster.year == year)
+    if published_only:
+        target_rosters_q = target_rosters_q.where(Roster.status == RosterStatus.PUBLISHED)
+
+    from sqlalchemy import case
+    target_roster = db.scalar(
+        target_rosters_q.order_by(
+            case((Roster.status == RosterStatus.PUBLISHED, 0), else_=1),
+            Roster.version.desc(),
+            Roster.created_at.desc(),
+        )
+    )
+
     query = select(RosterAllocation).where(RosterAllocation.employee_id == user.employee_id)
+    if target_roster:
+        query = query.where(RosterAllocation.roster_id == target_roster.id)
 
     # Filter to active published or draft rosters
     allocs = db.scalars(query).all()
@@ -566,11 +585,19 @@ def preview_employee_request_impact(
         for rc in rcs:
             desc_lower = rc.description.lower()
             is_shortage = (
-                rc.conflict_type in (ConflictType.UNCOVERED_SLOT, ConflictType.OVERLAPPING_SHIFT)
+                rc.conflict_type in (
+                    ConflictType.UNCOVERED_SLOT,
+                    ConflictType.PARTIAL_COVERAGE,
+                    ConflictType.UNAVAILABLE_ALLOCATION,
+                    ConflictType.SHIFT_BOUND_EXCEEDED,
+                )
+                or rc.employee_id == emp.id
                 or "shortfall" in desc_lower
                 or "insufficient" in desc_lower
                 or "uncovered" in desc_lower
                 or "staffing" in desc_lower
+                or "shortage" in desc_lower
+                or "unavailab" in desc_lower
             )
             if is_shortage:
                 b_name = "General Brand"

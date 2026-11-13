@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from datetime import time
 from uuid import UUID
 
@@ -50,6 +51,7 @@ class EmployeeRead(EmployeeBase):
     status: EmployeeStatus
     temporary_password: str | None = None
     login_email: str | None = None
+    conflict_check: dict[str, Any] | None = None
 
 
 class PodCreate(BaseModel):

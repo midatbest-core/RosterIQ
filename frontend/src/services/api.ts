@@ -21,6 +21,7 @@ import {
   DemoRole,
   ValidationErrorDetail,
   QuickLoginAccount,
+  ConflictCheckSummary,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -193,7 +194,7 @@ export const api = {
       inMemoryCsrfToken = (res as any).csrf_token;
       try {
         sessionStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
-      } catch {}
+      } catch { }
     }
     return (res as any).user ? (res as any).user : (res as User);
   },
@@ -207,7 +208,7 @@ export const api = {
       inMemoryCsrfToken = (res as any).csrf_token;
       try {
         sessionStorage.setItem('rosteriq_csrf_token', inMemoryCsrfToken);
-      } catch {}
+      } catch { }
     }
     return (res as any).user ? (res as any).user : (res as User);
   },
@@ -228,7 +229,7 @@ export const api = {
       inMemoryCsrfToken = '';
       try {
         sessionStorage.removeItem('rosteriq_csrf_token');
-      } catch {}
+      } catch { }
     }
   },
   getNotifications: () => request<AppNotification[]>('/auth/notifications'),
@@ -301,6 +302,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ code, name }),
     }),
+  updateBrand: (brandId: string, data: { status?: 'ACTIVE' | 'INACTIVE'; name?: string; code?: string }) =>
+    request<Brand>(`/brands/${brandId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 
   getProcesses: () => request<ProcessItem[]>('/processes'),
   createProcess: (code: string, name: string, description?: string) =>
@@ -314,6 +320,11 @@ export const api = {
     request<BrandProcess>('/brand-processes', {
       method: 'POST',
       body: JSON.stringify({ brand_id, process_id }),
+    }),
+  updateBrandProcess: (brandProcessId: string, data: { is_active?: boolean; holiday_behavior?: string }) =>
+    request<BrandProcess>(`/brand-processes/${brandProcessId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
     }),
 
   getAssignments: () => request<PrimaryAssignment[]>('/assignments'),
@@ -339,6 +350,8 @@ export const api = {
     request<RosterSummary>(`/rosters/${roster_id}/publish`, { method: 'POST' }),
   createChildVersion: (roster_id: string) =>
     request<RosterSummary>(`/rosters/${roster_id}/create-child-version`, { method: 'POST' }),
+  revalidateAllRosters: () =>
+    request<ConflictCheckSummary>('/rosters/revalidate-all', { method: 'POST' }),
 
   // Reassignment
   getBackupCandidates: (roster_id: string, brand_process_id: string, date: string, start_time: string, end_time: string) =>

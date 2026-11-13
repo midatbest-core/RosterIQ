@@ -31,7 +31,8 @@ class EligibilityChecker:
         slot_interval: TimeInterval,
         target_date: date,
         unavailabilities: dict[tuple[uuid.UUID, date], UnavailabilitySpec],
-        current_allocations: list[ScheduledAllocation],
+        current_allocations: list[ScheduledAllocation] | None = None,
+        emp_allocations_today: list[ScheduledAllocation] | None = None,
     ) -> tuple[bool, str]:
         # 1. Active employee status
         if not employee.is_active:
@@ -56,9 +57,14 @@ class EligibilityChecker:
             )
 
         # 5. Overlapping allocation check (Strict non-overlapping intervals within same date)
-        emp_allocs_today = [
-            a for a in current_allocations if a.employee_id == employee.id and a.date == target_date
-        ]
+        if emp_allocations_today is None:
+            emp_allocs_today = (
+                [a for a in current_allocations if a.employee_id == employee.id and a.date == target_date]
+                if current_allocations else []
+            )
+        else:
+            emp_allocs_today = emp_allocations_today
+
         for existing in emp_allocs_today:
             if existing.interval.overlaps(slot_interval):
                 return (

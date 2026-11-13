@@ -176,6 +176,21 @@ export interface Pod {
   is_active: boolean;
 }
 
+export interface ConflictCheckSummary {
+  checked: boolean;
+  rosters_checked: number;
+  total_conflicts: number;
+  hard_conflicts: number;
+  message: string;
+  rosters?: Array<{
+    roster_id: string;
+    roster_name: string;
+    status: string;
+    total_conflicts: number;
+    hard_conflicts: number;
+  }>;
+}
+
 export interface Employee {
   id: string;
   employee_code: string;
@@ -188,6 +203,7 @@ export interface Employee {
   standard_end_time: string;
   temporary_password?: string;
   login_email?: string;
+  conflict_check?: ConflictCheckSummary;
 }
 
 export interface ProcessItem {
@@ -221,6 +237,7 @@ export interface CreatedCredentials {
   temporaryPassword: string;
   podName?: string;
   code?: string;
+  conflict_check?: ConflictCheckSummary;
 }
 
 export interface QuickLoginAccount {
@@ -242,6 +259,7 @@ export interface BrandProcess {
   holiday_behavior: 'CLOSED' | 'NORMAL' | 'REDUCED';
   holiday_min_employees?: number | null;
   is_active: boolean;
+  conflict_check?: ConflictCheckSummary;
 }
 
 export interface OperatingPattern {
@@ -264,6 +282,7 @@ export interface PrimaryAssignment {
   effective_to?: string | null;
   priority: number;
   is_active: boolean;
+  conflict_check?: ConflictCheckSummary;
 }
 
 export interface EmployeeUnavailability {

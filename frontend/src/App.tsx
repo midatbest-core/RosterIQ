@@ -112,7 +112,7 @@ export const App: React.FC = () => {
   if (currentUser.role === 'BRAND_USER') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-        <header className="relative z-50 border-b border-slate-800 bg-slate-900/80 backdrop-blur px-6 py-4 flex items-center justify-between">
+        <header className="relative z-[9999] border-b border-slate-800 bg-slate-900/90 backdrop-blur px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <RosterIQLogo variant="full" size="md" showTagline={false} />
             <div className="h-5 w-px bg-slate-800" />
@@ -138,7 +138,7 @@ export const App: React.FC = () => {
             </button>
           </div>
         </header>
-        <main className="flex-1">
+        <main className="relative z-0 flex-1">
           <BrandPortalScreen />
         </main>
       </div>
@@ -149,7 +149,7 @@ export const App: React.FC = () => {
   if (currentUser.role === 'EMPLOYEE') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-        <header className="relative z-50 border-b border-slate-800 bg-slate-900/80 backdrop-blur px-6 py-4 flex items-center justify-between">
+        <header className="relative z-[9999] border-b border-slate-800 bg-slate-900/90 backdrop-blur px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <RosterIQLogo variant="full" size="md" showTagline={false} />
             <div className="h-5 w-px bg-slate-800" />
@@ -175,7 +175,7 @@ export const App: React.FC = () => {
             </button>
           </div>
         </header>
-        <main className="flex-1">
+        <main className="relative z-0 flex-1">
           <EmployeePortalScreen />
         </main>
       </div>
@@ -265,16 +265,36 @@ export const App: React.FC = () => {
       )}
 
       {activeTab === 'employees' && (
-        <WorkforceScreen initialSubTab="employees" searchQuery={searchQuery} currentUser={currentUser} />
+        <WorkforceScreen
+          initialSubTab="employees"
+          searchQuery={searchQuery}
+          currentUser={currentUser}
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+        />
       )}
 
       {activeTab === 'pods' && (
-        <WorkforceScreen initialSubTab="pods" searchQuery={searchQuery} currentUser={currentUser} />
+        <WorkforceScreen
+          initialSubTab="pods"
+          searchQuery={searchQuery}
+          currentUser={currentUser}
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+        />
       )}
 
-      {activeTab === 'brands' && <OperationsScreen initialSubTab="brands" />}
+      {activeTab === 'brands' && (
+        <OperationsScreen
+          initialSubTab="brands"
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+        />
+      )}
 
-      {activeTab === 'assignments' && <OperationsScreen initialSubTab="assignments" />}
+      {activeTab === 'assignments' && (
+        <OperationsScreen
+          initialSubTab="assignments"
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+        />
+      )}
 
       {activeTab === 'history' && (
         <AuditHistoryScreen

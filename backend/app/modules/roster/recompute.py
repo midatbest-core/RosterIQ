@@ -3,7 +3,8 @@ from __future__ import annotations
 import calendar
 import uuid
 from datetime import date
-from sqlalchemy import select, delete
+from typing import Any
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import Session
 
 from app.modules.operations.models import (
@@ -16,6 +17,7 @@ from app.modules.operations.pattern_models import (
     OperatingPattern,
 )
 from app.modules.roster.engine import (
+    AllocationType as EngineAllocationType,
     ConflictSeverity as EngineConflictSeverity,
     EmployeeSpec,
     HolidayBehavior as EngineHolidayBehavior,
@@ -63,7 +65,12 @@ def recompute_roster_conflicts_sync(db: Session, roster_id: uuid.UUID) -> int:
     num_days = calendar.monthrange(roster.year, roster.month)[1]
     all_dates = [date(roster.year, roster.month, d) for d in range(1, num_days + 1)]
 
-    bps = db.scalars(select(BrandProcess).where(BrandProcess.is_active == True)).all()
+    from app.modules.operations.models import Brand, RecordStatus
+    bps = db.scalars(
+        select(BrandProcess)
+        .join(Brand, BrandProcess.brand_id == Brand.id)
+        .where(BrandProcess.is_active == True, Brand.status == RecordStatus.ACTIVE)
+    ).all()
     bp_list = [(bp.id, bp.brand_id, bp.process_id) for bp in bps]
 
     patterns = db.scalars(select(OperatingPattern)).all()
@@ -148,7 +155,26 @@ def recompute_roster_conflicts_sync(db: Session, roster_id: uuid.UUID) -> int:
         for s in shifts
     ]
 
+    # Map primary pods for each brand_process to detect cross-pod allocations when employees move
+    primary_assignments = db.scalars(select(PrimaryAssignment).where(PrimaryAssignment.is_active == True)).all()
+    bp_primary_pods: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for pa in primary_assignments:
+        p_emp = emp_map.get(pa.employee_id)
+        if p_emp and p_emp.pod_id:
+            bp_primary_pods.setdefault(pa.brand_process_id, set()).add(p_emp.pod_id)
+
     allocs = db.scalars(select(RosterAllocation).where(RosterAllocation.roster_id == roster.id)).all()
+    
+    # Check if any employee was moved to a different pod than the brand_process's primary pod
+    for a in allocs:
+        emp = emp_map.get(a.employee_id)
+        target_pods = bp_primary_pods.get(a.brand_process_id, set())
+        if emp and emp.pod_id and target_pods and emp.pod_id not in target_pods:
+            if a.allocation_type != EngineAllocationType.CROSS_POD_REASSIGNMENT:
+                a.allocation_type = EngineAllocationType.CROSS_POD_REASSIGNMENT
+                if not a.is_cross_pod_approved:
+                    a.is_cross_pod_approved = False
+
     engine_allocs = [
         ScheduledAllocation(
             id=a.id,
@@ -156,6 +182,7 @@ def recompute_roster_conflicts_sync(db: Session, roster_id: uuid.UUID) -> int:
             brand_process_id=a.brand_process_id,
             date=a.date,
             interval=TimeInterval(a.start_time, a.end_time),
+            allocation_type=EngineAllocationType(a.allocation_type.value if hasattr(a.allocation_type, "value") else str(a.allocation_type)),
             is_cross_pod_approved=a.is_cross_pod_approved,
         )
         for a in allocs
@@ -197,4 +224,49 @@ def recompute_roster_conflicts_sync(db: Session, roster_id: uuid.UUID) -> int:
 
     db.flush()
     return hard_count
+
+
+def recompute_all_active_rosters_conflicts(db: Session) -> dict[str, Any]:
+    """
+    Automatically recomputes conflicts across all active rosters (DRAFT, VALIDATED, PUBLISHED, STALE).
+    Updates roster_conflicts, updates roster status, and returns a consolidated summary.
+    """
+    rosters = db.scalars(
+        select(Roster).where(
+            Roster.status.in_([RosterStatus.DRAFT, RosterStatus.VALIDATED, RosterStatus.PUBLISHED, RosterStatus.STALE])
+        ).order_by(Roster.created_at.desc())
+    ).all()
+
+    total_conflicts = 0
+    total_hard = 0
+    summaries = []
+
+    for r in rosters:
+        hard_count = recompute_roster_conflicts_sync(db, r.id)
+        count = db.scalar(
+            select(func.count(RosterConflict.id)).where(RosterConflict.roster_id == r.id)
+        ) or 0
+        total_conflicts += count
+        total_hard += hard_count
+        summaries.append({
+            "roster_id": str(r.id),
+            "roster_name": r.name,
+            "status": r.status.value,
+            "total_conflicts": count,
+            "hard_conflicts": hard_count,
+        })
+
+    db.flush()
+    return {
+        "checked": True,
+        "rosters_checked": len(rosters),
+        "total_conflicts": total_conflicts,
+        "hard_conflicts": total_hard,
+        "rosters": summaries,
+        "message": (
+            f"Automatic conflict check completed across {len(rosters)} roster(s): "
+            f"{total_hard} hard violation(s), {total_conflicts} total conflict(s) identified."
+            if len(rosters) > 0 else "No active rosters to check."
+        ),
+    }
 

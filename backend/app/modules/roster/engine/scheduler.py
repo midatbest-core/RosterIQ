@@ -66,6 +66,9 @@ class DeterministicScheduler:
         for pa in sorted(primary_assignments, key=lambda a: a.priority):
             bp_primary_map.setdefault(pa.brand_process_id, []).append(pa)
 
+        # O(1) indexed allocations lookup for lightning-fast monthly scheduling
+        allocs_by_emp_date: dict[tuple[uuid.UUID, date], list[ScheduledAllocation]] = {}
+
         # Iterate over each date of the month
         for target_date in all_dates:
             is_holiday = target_date in company_holidays
@@ -123,6 +126,7 @@ class DeterministicScheduler:
                             target_date=target_date,
                             unavailabilities=unavailabilities,
                             current_allocations=result.allocations,
+                            emp_allocations_today=allocs_by_emp_date.get((emp.id, target_date)),
                         )
                         if eligible:
                             alloc = ScheduledAllocation(
@@ -134,6 +138,7 @@ class DeterministicScheduler:
                                 allocation_type=AllocationType.PRIMARY,
                             )
                             result.allocations.append(alloc)
+                            allocs_by_emp_date.setdefault((emp.id, target_date), []).append(alloc)
                             allocated_for_slot += 1
 
                 # B. If understaffed, search eligible SAME-POD backup candidates only
@@ -142,6 +147,10 @@ class DeterministicScheduler:
                     cross_pod_candidates: list[CrossPodCandidate] = []
 
                     already_allocated_emp_ids = {
+                        a.employee_id
+                        for a in allocs_by_emp_date.get((slot.brand_process_id, target_date), [])
+                        if a.date == target_date and a.brand_process_id == slot.brand_process_id
+                    } if False else {
                         a.employee_id
                         for a in result.allocations
                         if a.date == target_date and a.brand_process_id == slot.brand_process_id
@@ -158,6 +167,7 @@ class DeterministicScheduler:
                             target_date=target_date,
                             unavailabilities=unavailabilities,
                             current_allocations=result.allocations,
+                            emp_allocations_today=allocs_by_emp_date.get((emp.id, target_date)),
                         )
                         if eligible:
                             is_same_pod = emp.pod_id in primary_pods if primary_pods else False
@@ -197,6 +207,7 @@ class DeterministicScheduler:
                             notes="Auto same-pod backup allocation",
                         )
                         result.allocations.append(alloc)
+                        allocs_by_emp_date.setdefault((emp.id, target_date), []).append(alloc)
                         allocated_for_slot += 1
 
                     # Record cross-pod candidates in schedule result for future manager discovery

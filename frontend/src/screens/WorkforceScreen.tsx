@@ -21,18 +21,22 @@ import {
   Briefcase,
   Sliders,
   ArrowRightLeft,
+  AlertTriangle,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface WorkforceScreenProps {
   initialSubTab?: 'employees' | 'pods';
   searchQuery?: string;
   currentUser?: User | null;
+  onNavigateToConflicts?: () => void;
 }
 
 export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   initialSubTab = 'employees',
   searchQuery = '',
   currentUser,
+  onNavigateToConflicts,
 }) => {
   const isPodLead = currentUser?.role === 'POD_LEAD';
   const [subTab, setSubTab] = useState<'employees' | 'pods'>(initialSubTab);
@@ -82,6 +86,12 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   const [showRelocateModal, setShowRelocateModal] = useState(false);
   const [isRelocating, setIsRelocating] = useState(false);
   const [drawerPodTarget, setDrawerPodTarget] = useState<string>('');
+  const [conflictNotification, setConflictNotification] = useState<{
+    title: string;
+    message: string;
+    total_conflicts: number;
+    hard_conflicts: number;
+  } | null>(null);
 
   useEffect(() => {
     loadWorkforceData();
@@ -131,6 +141,7 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
         temporaryPassword: created.temporary_password || 'EmployeePass123!',
         podName: assignedPod?.name || 'Assigned Pod',
         code: created.employee_code || empCode,
+        conflict_check: created.conflict_check,
       });
       setShowCredsModal(true);
     } catch (err: any) {
@@ -204,7 +215,16 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
       setSelectedEmp(updated);
       await loadWorkforceData();
       const targetPod = pods.find((p) => p.id === drawerPodTarget);
-      alert(`Successfully relocated ${selectedEmp.name} to ${targetPod?.name || 'new pod'}!`);
+      if (updated.conflict_check) {
+        setConflictNotification({
+          title: `Relocated ${selectedEmp.name} to ${targetPod?.name || 'New Pod'}`,
+          message: updated.conflict_check.message,
+          total_conflicts: updated.conflict_check.total_conflicts,
+          hard_conflicts: updated.conflict_check.hard_conflicts,
+        });
+      } else {
+        alert(`Successfully relocated ${selectedEmp.name} to ${targetPod?.name || 'new pod'}!`);
+      }
     } catch (err: any) {
       alert(err.message || 'Failed to relocate employee');
     } finally {
@@ -223,10 +243,22 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
     if (!relocatingEmp || !targetPodId) return;
     try {
       setIsRelocating(true);
-      await api.relocateEmployee(relocatingEmp.id, targetPodId);
+      const updated = await api.relocateEmployee(relocatingEmp.id, targetPodId);
+      const targetPod = pods.find((p) => p.id === targetPodId);
+      const empName = relocatingEmp.name;
       setShowRelocateModal(false);
       setRelocatingEmp(null);
       await loadWorkforceData();
+      if (updated.conflict_check) {
+        setConflictNotification({
+          title: `Relocated ${empName} to ${targetPod?.name || 'New Pod'}`,
+          message: updated.conflict_check.message,
+          total_conflicts: updated.conflict_check.total_conflicts,
+          hard_conflicts: updated.conflict_check.hard_conflicts,
+        });
+      } else {
+        alert(`Successfully relocated ${empName} to ${targetPod?.name || 'new pod'}!`);
+      }
     } catch (err: any) {
       alert(err.message || 'Failed to relocate employee');
     } finally {
@@ -843,6 +875,7 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
         isOpen={showCredsModal}
         onClose={() => setShowCredsModal(false)}
         credentials={createdCreds}
+        onOpenConflicts={onNavigateToConflicts}
       />
 
       {/* Relocate Employee Modal */}
@@ -903,6 +936,75 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
           </div>
         </div>
       </Modal>
+
+      {/* Conflict Check Feedback Modal */}
+      {conflictNotification && (
+        <Modal
+          isOpen={!!conflictNotification}
+          onClose={() => setConflictNotification(null)}
+          title="Automatic Conflict Check Complete"
+          subtitle={conflictNotification.title}
+          maxWidth="md"
+        >
+          <div className="space-y-4 p-1">
+            <div className={`p-4 rounded-xl border flex items-start gap-3 ${
+              conflictNotification.total_conflicts > 0
+                ? 'bg-amber-50 border-amber-200 text-amber-950'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-950'
+            }`}>
+              <div className={`p-2 rounded-lg shrink-0 ${
+                conflictNotification.total_conflicts > 0
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-emerald-100 text-emerald-700'
+              }`}>
+                {conflictNotification.total_conflicts > 0 ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5" />
+                )}
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold">
+                  {conflictNotification.total_conflicts === 0
+                    ? '✓ No Conflicts Detected'
+                    : `⚠️ ${conflictNotification.total_conflicts} Conflict(s) Detected (${conflictNotification.hard_conflicts} Hard Violations)`}
+                </h4>
+                <p className="text-xs leading-relaxed opacity-90">
+                  {conflictNotification.message}
+                </p>
+                {conflictNotification.total_conflicts > 0 && (
+                  <p className="text-[11px] text-amber-800 font-medium pt-1">
+                    Moving an employee across pods can introduce unapproved cross-pod allocations, uncovered shifts, or staffing shortages in active rosters.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConflictNotification(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
+              {conflictNotification.total_conflicts > 0 && onNavigateToConflicts && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConflictNotification(null);
+                    onNavigateToConflicts();
+                  }}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>Open Conflict Resolver</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
