@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     google_service_account_info: str = ""
     google_service_account_file: str = ""
 
+    # Presentation Demo Credentials (Staging / Development only; strictly forbidden in production)
+    enable_demo_credentials: bool = False
+    demo_credentials_json: str = ""
+
 
 
 @lru_cache

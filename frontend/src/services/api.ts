@@ -17,6 +17,7 @@ import {
   ResolverApplyRequest,
   ResolverApplyResponse,
   AppNotification,
+  PresentationDemoAccount,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -69,6 +70,8 @@ export const api = {
     });
     return (res as any).user ? (res as any).user : (res as User);
   },
+  getPresentationDemoAccounts: () =>
+    request<PresentationDemoAccount[]>('/auth/presentation-demo-accounts'),
   getCurrentUser: () => request<User>('/auth/me'),
   logout: () => request<{ message: string }>('/auth/logout', { method: 'POST' }),
   getNotifications: () => request<AppNotification[]>('/auth/notifications'),

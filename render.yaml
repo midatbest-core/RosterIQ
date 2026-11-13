@@ -12,7 +12,11 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.8
       - key: ROSTERIQ_ENVIRONMENT
-        value: production
+        value: staging
+      - key: ROSTERIQ_ENABLE_DEMO_CREDENTIALS
+        value: "true"
+      - key: ROSTERIQ_DEMO_CREDENTIALS_JSON
+        sync: false
       - key: ROSTERIQ_DATABASE_URL
         sync: false
       - key: ROSTERIQ_JWT_SECRET

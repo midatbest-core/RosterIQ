@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { User } from '../services/types';
+import { User, PresentationDemoAccount } from '../services/types';
 import {
   Calendar,
   Lock,
@@ -11,8 +11,13 @@ import {
   Users,
   Shield,
   Layers,
+  UserCheck,
   ChevronDown,
   ChevronUp,
+  KeyRound,
+  Copy,
+  Check,
+  Sparkles,
 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -20,28 +25,42 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
-  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@example.com' : '');
-  const [password, setPassword] = useState(import.meta.env.DEV ? 'AdminPass123!' : '');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Pod-Wise Quick Login Directory
-  const [demoAccounts, setDemoAccounts] = useState<any | null>(null);
-  const [showDirectory, setShowDirectory] = useState(false);
-  const [selectedPodTab, setSelectedPodTab] = useState<string>('');
+  // Presentation Demo Accounts (Staging / Development only; server-gated)
+  const [presentationAccounts, setPresentationAccounts] = useState<PresentationDemoAccount[]>([]);
+  const [showPresentationAccounts, setShowPresentationAccounts] = useState<boolean>(true);
+  const [demoLoading, setDemoLoading] = useState<boolean>(true);
+  const [demoDisabled, setDemoDisabled] = useState<boolean>(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    fetch('/api/v1/auth/demo-accounts')
-      .then((r) => r.json())
-      .then((data) => {
-        setDemoAccounts(data);
-        const podKeys = Object.keys(data.employees_by_pod || {});
-        if (podKeys.length > 0) {
-          setSelectedPodTab(podKeys[0]);
+    let active = true;
+    api.getPresentationDemoAccounts()
+      .then((accounts) => {
+        if (!active) return;
+        setPresentationAccounts(accounts);
+        setDemoDisabled(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        // In production or when flag is disabled, server returns 403 Forbidden
+        setPresentationAccounts([]);
+        setDemoDisabled(true);
+        if (import.meta.env.DEV) {
+          console.log('Presentation demo credentials unavailable:', err.message);
         }
       })
-      .catch((err) => console.log('Demo directory unavailable:', err));
+      .finally(() => {
+        if (active) setDemoLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,15 +77,37 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const selectQuickLogin = (uEmail: string, roleHint: string) => {
-    setEmail(uEmail);
-    // In dev demo seeds, standard role passwords apply:
-    if (roleHint === 'ADMIN') setPassword('AdminPass123!');
-    else if (roleHint === 'OPERATIONS_MANAGER') setPassword('OpsManager123!');
-    else if (roleHint === 'POD_LEAD') setPassword('PodLeadPass123!');
-    else if (roleHint === 'BRAND_USER') setPassword('BrandPass123!');
-    else if (roleHint === 'EMPLOYEE') setPassword('EmployeePass123!');
-    else setPassword('SecretPass123!');
+  const handleCopy = (text: string, key: string) => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => {
+        setCopiedKey(null);
+      }, 2000);
+    }
+  };
+
+  const handleUseAccount = (acc: PresentationDemoAccount) => {
+    setEmail(acc.email);
+    setPassword(acc.password);
+    setError(null);
+  };
+
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case 'ADMIN':
+        return <Shield className="w-3.5 h-3.5 text-indigo-500 shrink-0" />;
+      case 'OPERATIONS_MANAGER':
+        return <Users className="w-3.5 h-3.5 text-purple-500 shrink-0" />;
+      case 'POD_LEAD':
+        return <Layers className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
+      case 'BRAND_USER':
+        return <Building2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />;
+      case 'EMPLOYEE':
+        return <UserCheck className="w-3.5 h-3.5 text-cyan-500 shrink-0" />;
+      default:
+        return <KeyRound className="w-3.5 h-3.5 text-slate-500 shrink-0" />;
+    }
   };
 
   return (
@@ -139,123 +180,150 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             </button>
           </form>
 
-          {/* Quick-Fill Fast Demo Credentials & Directory (DEV-only) */}
-          {import.meta.env.DEV && (
-            <>
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Quick Role Credentials
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowDirectory(!showDirectory)}
-                    className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>{showDirectory ? 'Hide Full Pod Directory' : 'Explore All 58 Demo Accounts'}</span>
-                    {showDirectory ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => selectQuickLogin('admin@example.com', 'ADMIN')}
-                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
-                  >
-                    <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
-                      <Shield className="w-3 h-3 text-indigo-500" /> Admin
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-mono truncate block">admin@example.com</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => selectQuickLogin('ops@example.com', 'OPERATIONS_MANAGER')}
-                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
-                  >
-                    <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
-                      <Users className="w-3 h-3 text-purple-500" /> Ops Mgr
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-mono truncate block">ops@example.com</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => selectQuickLogin('podalpha.lead@example.com', 'POD_LEAD')}
-                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
-                  >
-                    <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
-                      <Layers className="w-3 h-3 text-emerald-500" /> Pod Alpha
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-mono truncate block">podalpha.lead@...</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => selectQuickLogin('brand.stellar@example.com', 'BRAND_USER')}
-                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-500 text-left transition-colors cursor-pointer bg-slate-50/50 dark:bg-slate-950/40"
-                  >
-                    <span className="font-semibold text-slate-900 dark:text-white block text-[11px] flex items-center gap-1">
-                      <Building2 className="w-3 h-3 text-amber-500" /> Brand User
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-mono truncate block">brand.stellar@...</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Pod-Wise Interactive Directory Drawer */}
-              {showDirectory && demoAccounts && (
-                <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3 animate-in fade-in">
-                  <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
-                    Pod-Wise Workforce & Brand User Accounts
-                  </span>
-
-                  {/* Pod Tabs */}
-                  <div className="flex flex-wrap gap-1.5 border-b border-slate-200 dark:border-slate-800 pb-2">
-                    {Object.keys(demoAccounts.employees_by_pod || {}).map((podName) => (
-                      <button
-                        key={podName}
-                        type="button"
-                        onClick={() => setSelectedPodTab(podName)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-                          selectedPodTab === podName
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                        }`}
-                      >
-                        {podName}
-                      </button>
-                    ))}
+          {/* Presentation Demo Accounts Section (Server-gated for Staging / Presentations) */}
+          {!demoDisabled && (
+            <div className="pt-4 border-t border-slate-200/80 dark:border-slate-800/80 space-y-3">
+              <button
+                type="button"
+                onClick={() => setShowPresentationAccounts(!showPresentationAccounts)}
+                className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-800 transition-all text-left cursor-pointer group"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400">
+                    <KeyRound className="w-4 h-4" />
                   </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">
+                        Presentation Demo Accounts
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
+                        <Sparkles className="w-2.5 h-2.5" /> 5 Verified Roles
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Staging test credentials for evaluator presentations & walkthroughs
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 transition-colors">
+                  <span className="text-[11px] font-medium hidden sm:inline">
+                    {showPresentationAccounts ? 'Hide' : 'Show'}
+                  </span>
+                  {showPresentationAccounts ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </div>
+              </button>
 
-                  {/* Employees in selected Pod */}
-                  {selectedPodTab && demoAccounts.employees_by_pod[selectedPodTab] && (
-                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-                      {demoAccounts.employees_by_pod[selectedPodTab].map((emp: any) => (
-                        <div
-                          key={emp.id}
-                          onClick={() => selectQuickLogin(emp.email, 'EMPLOYEE')}
-                          className="p-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-500 flex items-center justify-between cursor-pointer text-xs"
-                        >
-                          <div>
-                            <span className="font-semibold text-slate-900 dark:text-white block">{emp.name}</span>
-                            <span className="text-[10px] text-slate-500 font-mono">{emp.email}</span>
-                          </div>
-                          <span className="px-2 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                            Select Employee
-                          </span>
-                        </div>
-                      ))}
+              {/* Expandable Demo Accounts Cards */}
+              {showPresentationAccounts && (
+                <div className="space-y-2 pt-1 animate-in fade-in duration-200">
+                  {demoLoading && (
+                    <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400">
+                      Loading presentation credentials from staging server...
                     </div>
                   )}
+
+                  {presentationAccounts.map((acc) => {
+                    const isSelected = email === acc.email;
+                    const emailCopyKey = `${acc.role}-email`;
+                    const pwdCopyKey = `${acc.role}-pwd`;
+
+                    return (
+                      <div
+                        key={acc.role}
+                        className={`p-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-700 shadow-xs'
+                            : 'bg-slate-50/70 dark:bg-slate-950/40 border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <span className="p-1.5 rounded-lg bg-slate-200/60 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {getRoleIcon(acc.role)}
+                            </span>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-xs text-slate-900 dark:text-white">
+                                  {acc.role_name}
+                                </span>
+                                <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 px-1.5 py-0.2 bg-slate-200/50 dark:bg-slate-800 rounded">
+                                  {acc.role}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1">
+                                {acc.description}
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleUseAccount(acc)}
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-colors cursor-pointer shrink-0"
+                          >
+                            <span>Use Account</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        {/* Credentials Fields with Copy Buttons */}
+                        <div className="mt-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          {/* Email Field with Copy */}
+                          <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="text-[11px] font-mono text-slate-700 dark:text-slate-300 truncate">
+                                {acc.email}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(acc.email, emailCopyKey)}
+                              title="Copy Email"
+                              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded transition-colors cursor-pointer shrink-0"
+                            >
+                              {copiedKey === emailCopyKey ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Password Field with Copy */}
+                          <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="text-[11px] font-mono text-slate-700 dark:text-slate-300 truncate tracking-wide">
+                                {acc.password}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(acc.password, pwdCopyKey)}
+                              title="Copy Password"
+                              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded transition-colors cursor-pointer shrink-0"
+                            >
+                              {copiedKey === pwdCopyKey ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
     </div>
   );
 };
+
 export default LoginScreen;

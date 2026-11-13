@@ -505,6 +505,15 @@ export interface AppNotification {
   request_status?: string | null;
 }
 
+export interface PresentationDemoAccount {
+  role: string;
+  role_name: string;
+  email: string;
+  password: string;
+  description: string;
+}
+
+
 
 
 

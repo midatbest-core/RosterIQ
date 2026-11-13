@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -246,5 +248,96 @@ def get_demo_accounts(db: Session = Depends(get_db)) -> dict:
         "brand_users": sorted(brands, key=lambda x: x["name"] or ""),
         "employees_by_pod": {k: sorted(v, key=lambda x: x["name"]) for k, v in employees_by_pod.items()},
     }
+
+
+@router.get("/presentation-demo-accounts")
+def get_presentation_demo_accounts() -> list[dict[str, str]]:
+    """
+    Returns presentation demo accounts for college demonstrations.
+    Strictly forbidden when production environment is active.
+    Requires settings.enable_demo_credentials to be True.
+    """
+    settings = get_settings()
+
+    # Rule 1: Forbid unconditionally if environment is production
+    if settings.environment.lower() == "production":
+        raise AppError(
+            code="FORBIDDEN",
+            message="Presentation demo accounts are strictly disabled in production.",
+            status_code=403,
+        )
+
+    # Rule 2: Require explicit demo-credentials flag to be enabled
+    if not settings.enable_demo_credentials:
+        raise AppError(
+            code="FORBIDDEN",
+            message="Presentation demo credentials flag (ROSTERIQ_ENABLE_DEMO_CREDENTIALS) is disabled.",
+            status_code=403,
+        )
+
+    role_display_names = {
+        "ADMIN": "System Admin",
+        "OPERATIONS_MANAGER": "Operations Manager",
+        "POD_LEAD": "Pod Lead",
+        "BRAND_USER": "Brand User",
+        "EMPLOYEE": "Employee",
+    }
+
+    accounts: list[dict[str, str]] = []
+
+    # Check local staging credentials file
+    candidate_paths = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.staging_test_credentials.local")),
+        os.path.abspath("backend/.staging_test_credentials.local"),
+        os.path.abspath(".staging_test_credentials.local"),
+    ]
+    file_path = next((p for p in candidate_paths if os.path.exists(p)), None)
+
+    if file_path:
+        current_account: dict[str, str] = {}
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    if current_account.get("email") and current_account.get("password"):
+                        accounts.append(current_account)
+                    role = line[1:-1]
+                    current_account = {
+                        "role": role,
+                        "role_name": role_display_names.get(role, role),
+                        "email": "",
+                        "password": "",
+                        "description": "",
+                    }
+                elif line.startswith("Email: ") and current_account:
+                    current_account["email"] = line.split("Email: ", 1)[1].strip()
+                elif line.startswith("Password: ") and current_account:
+                    current_account["password"] = line.split("Password: ", 1)[1].strip()
+                elif line.startswith("Description: ") and current_account:
+                    current_account["description"] = line.split("Description: ", 1)[1].strip()
+            if current_account.get("email") and current_account.get("password"):
+                accounts.append(current_account)
+
+    # Fallback to demo_credentials_json if running on hosted container without local file
+    if not accounts and settings.demo_credentials_json:
+        try:
+            parsed = json.loads(settings.demo_credentials_json)
+            if isinstance(parsed, list):
+                accounts = parsed
+        except Exception:
+            pass
+
+    if not accounts:
+        raise AppError(
+            code="NOT_FOUND",
+            message="No staging demo credentials configured.",
+            status_code=404,
+        )
+
+    order = ["ADMIN", "OPERATIONS_MANAGER", "POD_LEAD", "BRAND_USER", "EMPLOYEE"]
+    account_map = {a.get("role"): a for a in accounts}
+    sorted_accounts = [account_map[r] for r in order if r in account_map]
+    return sorted_accounts if sorted_accounts else accounts
+
 
 
