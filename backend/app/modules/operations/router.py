@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
 from datetime import date
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, delete
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -196,11 +197,49 @@ def update_brand(brand_id: UUID, payload: BrandUpdate, db: Session = Depends(get
     return brand
 
 
-@router.delete("/brands/{brand_id}", status_code=204, dependencies=mutation_dependencies)
-def deactivate_brand(brand_id: UUID, db: Session = Depends(get_db)) -> None:
+@router.delete("/brands/{brand_id}", dependencies=mutation_dependencies)
+def delete_brand(brand_id: UUID, db: Session = Depends(get_db)) -> dict[str, Any]:
     brand = require_record(db, Brand, brand_id, "BRAND_NOT_FOUND", "Brand")
-    brand.status = RecordStatus.INACTIVE
+    brand_name = brand.name
+
+    # 1. Find all BrandProcess records for this brand
+    bps = db.scalars(select(BrandProcess).where(BrandProcess.brand_id == brand_id)).all()
+    bp_ids = [bp.id for bp in bps]
+    
+    if bp_ids:
+        # 2. Clean up child records referencing these brand_processes
+        from app.modules.operations.pattern_models import OperatingPattern, OperatingOverride
+        from app.modules.operations.models import PrimaryAssignment
+        from app.modules.roster.models import RosterAllocation, RosterConflict
+        from app.modules.operations.request_models import BrandChangeRequest
+        
+        db.execute(delete(PrimaryAssignment).where(PrimaryAssignment.brand_process_id.in_(bp_ids)))
+        db.execute(delete(OperatingPattern).where(OperatingPattern.brand_process_id.in_(bp_ids)))
+        db.execute(delete(OperatingOverride).where(OperatingOverride.brand_process_id.in_(bp_ids)))
+        db.execute(delete(RosterAllocation).where(RosterAllocation.brand_process_id.in_(bp_ids)))
+        db.execute(delete(RosterConflict).where(RosterConflict.brand_process_id.in_(bp_ids)))
+        db.execute(delete(BrandChangeRequest).where(BrandChangeRequest.brand_id == brand_id))
+        
+        # 3. Delete BrandProcesses
+        db.execute(delete(BrandProcess).where(BrandProcess.brand_id == brand_id))
+        
+    # 4. Clean up any User pointing to this brand
+    from app.modules.auth.models import User
+    users = db.scalars(select(User).where(User.brand_id == brand_id)).all()
+    for u in users:
+        u.brand_id = None
+        
+    # 5. Delete the Brand
+    db.delete(brand)
     db.commit()
+    
+    return {
+        "status": "SUCCESS",
+        "deleted_brand_id": str(brand_id),
+        "deleted_brand_name": brand_name,
+        "deleted_processes_count": len(bp_ids),
+        "message": f"Brand '{brand_name}' and all associated processes deleted successfully.",
+    }
 
 
 @router.get("/processes", response_model=list[ProcessRead])

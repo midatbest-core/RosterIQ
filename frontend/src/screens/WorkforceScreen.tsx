@@ -18,18 +18,23 @@ import {
   Trash2,
   Briefcase,
   Sliders,
+  ArrowRightLeft,
+  Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface WorkforceScreenProps {
   initialSubTab?: 'employees' | 'pods';
   searchQuery?: string;
   currentUser?: User | null;
+  onNavigateToConflicts?: () => void;
 }
 
 export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   initialSubTab = 'employees',
   searchQuery = '',
   currentUser,
+  onNavigateToConflicts,
 }) => {
   const isPodLead = currentUser?.role === 'POD_LEAD';
   const [subTab, setSubTab] = useState<'employees' | 'pods'>(initialSubTab);
@@ -37,6 +42,21 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
   const [pods, setPods] = useState<Pod[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Pod Relocation State
+  const [relocatingEmp, setRelocatingEmp] = useState<Employee | null>(null);
+  const [targetPodId, setTargetPodId] = useState<string>('');
+  const [showRelocateModal, setShowRelocateModal] = useState(false);
+  const [isRelocating, setIsRelocating] = useState(false);
+  const [drawerPodTarget, setDrawerPodTarget] = useState<string>('');
+
+  // Re-optimization prompt modal state
+  const [showReoptimizePrompt, setShowReoptimizePrompt] = useState<{ empName: string; podName: string } | null>(null);
+  const [isReoptimizing, setIsReoptimizing] = useState(false);
+
+  // Delete Pod Modal State
+  const [podToDelete, setPodToDelete] = useState<Pod | null>(null);
+  const [isDeletingPod, setIsDeletingPod] = useState(false);
 
   // Add Employee Modal
   const [showAddEmp, setShowAddEmp] = useState(false);
@@ -125,6 +145,7 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
 
   const handleOpenEmpDrawer = async (emp: Employee) => {
     setSelectedEmp(emp);
+    setDrawerPodTarget(emp.pod_id || '');
     setIsEmpDrawerOpen(true);
     try {
       const [uList, prefs] = await Promise.all([
@@ -135,6 +156,88 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
       if (prefs) setPrefDays(prefs.preferred_weekly_off_days);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleRelocateFromDrawer = async () => {
+    if (!selectedEmp || !drawerPodTarget || drawerPodTarget === selectedEmp.pod_id) return;
+    try {
+      setIsRelocating(true);
+      await api.relocateEmployee(selectedEmp.id, drawerPodTarget);
+      const targetPod = pods.find((p) => p.id === drawerPodTarget);
+      const empName = selectedEmp.name;
+      const podName = targetPod?.name || 'New Pod';
+      setIsEmpDrawerOpen(false);
+      await loadWorkforceData();
+      setShowReoptimizePrompt({
+        empName: empName,
+        podName: podName,
+      });
+    } catch (err: any) {
+      alert(err.message || 'Failed to relocate employee');
+    } finally {
+      setIsRelocating(false);
+    }
+  };
+
+  const handleOpenRelocateModal = (emp: Employee) => {
+    setRelocatingEmp(emp);
+    const otherPod = pods.find((p) => p.id !== emp.pod_id);
+    setTargetPodId(otherPod?.id || '');
+    setShowRelocateModal(true);
+  };
+
+  const handleConfirmRelocate = async () => {
+    if (!relocatingEmp || !targetPodId) return;
+    try {
+      setIsRelocating(true);
+      await api.relocateEmployee(relocatingEmp.id, targetPodId);
+      const targetPod = pods.find((p) => p.id === targetPodId);
+      const empName = relocatingEmp.name;
+      const podName = targetPod?.name || 'New Pod';
+      setShowRelocateModal(false);
+      setRelocatingEmp(null);
+      await loadWorkforceData();
+      setShowReoptimizePrompt({
+        empName: empName,
+        podName: podName,
+      });
+    } catch (err: any) {
+      alert(err.message || 'Failed to relocate employee');
+    } finally {
+      setIsRelocating(false);
+    }
+  };
+
+  const handleTriggerReoptimize = async () => {
+    try {
+      setIsReoptimizing(true);
+      await api.revalidateAllRosters();
+      setShowReoptimizePrompt(null);
+      if (onNavigateToConflicts) {
+        onNavigateToConflicts();
+      } else {
+        alert('Conflicts re-optimized across active rosters.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to re-optimize conflicts');
+    } finally {
+      setIsReoptimizing(false);
+    }
+  };
+
+  const handleConfirmDeletePod = async () => {
+    if (!podToDelete) return;
+    try {
+      setIsDeletingPod(true);
+      const res = await api.deletePod(podToDelete.id);
+      setPodToDelete(null);
+      await loadWorkforceData();
+      alert(res.message || 'Pod deleted and members relocated successfully.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete pod');
+    } finally {
+      setIsDeletingPod(false);
     }
   };
 
@@ -328,9 +431,29 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold">
-                          Profile &rarr;
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          {!isPodLead && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenRelocateModal(emp);
+                              }}
+                              className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded border border-indigo-100 transition-colors cursor-pointer"
+                              title="Relocate to another Pod"
+                            >
+                              <ArrowRightLeft className="w-3 h-3" />
+                              <span>Relocate</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEmpDrawer(emp)}
+                            className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                          >
+                            Profile &rarr;
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -363,6 +486,16 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
                       </span>
                     </div>
                   </div>
+                  {!isPodLead && (
+                    <button
+                      type="button"
+                      onClick={() => setPodToDelete(pod)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-colors cursor-pointer"
+                      title="Delete Pod & Relocate Members"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 <div className="space-y-1.5 text-xs">
@@ -556,6 +689,40 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
             </div>
           </div>
 
+          {/* Operational Pod Relocation (Managers Only) */}
+          {!isPodLead && (
+            <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-200/80 text-xs">
+              <span className="font-bold text-slate-900 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                <Network className="w-3.5 h-3.5 text-indigo-600" />
+                Operational Pod Relocation
+              </span>
+              <div className="space-y-2">
+                <label className="block text-slate-600">Assign to Operational Pod:</label>
+                <div className="flex gap-2">
+                  <select
+                    value={drawerPodTarget}
+                    onChange={(e) => setDrawerPodTarget(e.target.value)}
+                    className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                  >
+                    {pods.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} {p.id === selectedEmp?.pod_id ? '(Current)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={isRelocating || drawerPodTarget === selectedEmp?.pod_id}
+                    onClick={handleRelocateFromDrawer}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    {isRelocating ? 'Moving...' : 'Relocate'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Weekly Off Preference */}
           <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-200/80 text-xs">
             <span className="font-bold text-slate-900 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
@@ -679,6 +846,154 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({
           </div>
         </div>
       </DetailDrawer>
+
+      {/* Quick Relocate Modal */}
+      {showRelocateModal && relocatingEmp && (
+        <Modal
+          isOpen={showRelocateModal}
+          onClose={() => {
+            setShowRelocateModal(false);
+            setRelocatingEmp(null);
+          }}
+          title={`Relocate ${relocatingEmp.name}`}
+          subtitle={`Current Pod: ${pods.find((p) => p.id === relocatingEmp.pod_id)?.name || 'Unassigned'}`}
+          maxWidth="sm"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Target Operational Pod
+              </label>
+              <select
+                value={targetPodId}
+                onChange={(e) => setTargetPodId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+              >
+                {pods.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} {p.id === relocatingEmp.pod_id ? '(Current)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRelocateModal(false);
+                  setRelocatingEmp(null);
+                }}
+                className="px-3.5 py-1.5 border rounded-lg text-xs font-medium cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isRelocating || targetPodId === relocatingEmp.pod_id}
+                onClick={handleConfirmRelocate}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs transition-colors"
+              >
+                {isRelocating ? 'Relocating...' : 'Confirm Relocation'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Relocation Re-optimization Prompt Modal */}
+      {showReoptimizePrompt && (
+        <Modal
+          isOpen={!!showReoptimizePrompt}
+          onClose={() => setShowReoptimizePrompt(null)}
+          title="Employee Relocation Complete"
+          subtitle="Workforce allocation updated"
+          maxWidth="md"
+        >
+          <div className="space-y-4 p-1">
+            <div className="flex items-center gap-3 p-3.5 bg-indigo-50/70 border border-indigo-100 rounded-xl">
+              <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0" />
+              <p className="text-xs text-indigo-950 leading-relaxed">
+                <strong>{showReoptimizePrompt.empName}</strong> has been successfully relocated to <strong>{showReoptimizePrompt.podName}</strong>.
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-amber-50 border border-amber-200/80 rounded-xl space-y-1.5 text-xs text-amber-950">
+              <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                <Sparkles className="w-4 h-4 text-amber-600" />
+                <span>Re-optimize Conflicts</span>
+              </div>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                Relocating an employee between operational pods can alter process staffing, shift coverage, and weekly allocations. Would you like to re-optimize conflicts across active rosters now?
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowReoptimizePrompt(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+              >
+                Dismiss / Later
+              </button>
+              <button
+                type="button"
+                disabled={isReoptimizing}
+                onClick={handleTriggerReoptimize}
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isReoptimizing ? 'Re-optimizing...' : 'Re-optimize Conflicts'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Pod Confirmation Modal */}
+      {podToDelete && (
+        <Modal
+          isOpen={!!podToDelete}
+          onClose={() => setPodToDelete(null)}
+          title="Delete Pod & Relocate Members"
+          subtitle={`Permanently remove ${podToDelete.name}`}
+          maxWidth="md"
+        >
+          <div className="space-y-4 p-1">
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2 text-xs text-rose-950">
+              <div className="flex items-center gap-2 font-bold text-rose-900">
+                <AlertTriangle className="w-4 h-4 text-rose-600" />
+                <span>Confirm Pod Deletion</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-rose-800">
+                Deleting pod <strong>{podToDelete.name}</strong> will automatically transfer all{' '}
+                <strong>
+                  {employees.filter((e) => e.pod_id === podToDelete.id).length} employee(s)
+                </strong>{' '}
+                in this pod to the operational pod with the least members. The pod will then be permanently deleted.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setPodToDelete(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingPod}
+                onClick={handleConfirmDeletePod}
+                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingPod ? 'Relocating & Deleting...' : 'Confirm & Delete Pod'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

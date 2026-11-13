@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import calendar
 import csv
 from datetime import date, datetime, time, timezone
@@ -859,21 +861,67 @@ def get_roster_grid(
                 )
             )
 
-    conflict_responses = [
-        RosterConflictResponse(
-            id=c.id,
-            date=c.date,
-            brand_process_id=c.brand_process_id,
-            employee_id=c.employee_id,
-            start_time=c.start_time,
-            end_time=c.end_time,
-            severity=c.severity,
-            conflict_type=c.conflict_type,
-            description=c.description,
-            is_resolved=c.is_resolved,
+    # Map primary pods for brand processes
+    primaries_active = db.scalars(select(PrimaryAssignment).where(PrimaryAssignment.is_active == True)).all()
+    bp_pod_map: dict[uuid.UUID, uuid.UUID | None] = {}
+    for pa in primaries_active:
+        if pa.brand_process_id not in bp_pod_map:
+            emp = employees.get(pa.employee_id)
+            if emp and emp.pod_id:
+                bp_pod_map[pa.brand_process_id] = emp.pod_id
+
+    # Fallback to skills
+    emp_skills = db.scalars(select(EmployeeProcessSkill)).all()
+    bp_process_to_pod: dict[uuid.UUID, uuid.UUID] = {}
+    for s in emp_skills:
+        emp = employees.get(s.employee_id)
+        if emp and emp.pod_id and s.process_id not in bp_process_to_pod:
+            bp_process_to_pod[s.process_id] = emp.pod_id
+
+    for bp in bps.values():
+        if bp.id not in bp_pod_map and bp.process_id in bp_process_to_pod:
+            bp_pod_map[bp.id] = bp_process_to_pod[bp.process_id]
+
+    conflict_responses: list[RosterConflictResponse] = []
+    for c in conflicts:
+        b_name = None
+        p_name = None
+        c_pod_id = None
+        c_pod_name = None
+
+        if c.brand_process_id and c.brand_process_id in bps:
+            bp = bps[c.brand_process_id]
+            b_name = brands[bp.brand_id].name if bp.brand_id in brands else None
+            p_name = processes[bp.process_id].name if bp.process_id in processes else None
+            c_pod_id = bp_pod_map.get(bp.id)
+            if c_pod_id and c_pod_id in pods:
+                c_pod_name = pods[c_pod_id].name
+
+        if not c_pod_id and c.employee_id and c.employee_id in employees:
+            emp = employees[c.employee_id]
+            if emp.pod_id and emp.pod_id in pods:
+                c_pod_id = emp.pod_id
+                c_pod_name = pods[c_pod_id].name
+
+        conflict_responses.append(
+            RosterConflictResponse(
+                id=c.id,
+                date=c.date,
+                brand_process_id=c.brand_process_id,
+                employee_id=c.employee_id,
+                start_time=c.start_time,
+                end_time=c.end_time,
+                severity=c.severity,
+                conflict_type=c.conflict_type,
+                description=c.description,
+                is_resolved=c.is_resolved,
+                brand_name=b_name,
+                process_name=p_name,
+                required_skill=p_name,
+                pod_name=c_pod_name,
+                pod_id=c_pod_id,
+            )
         )
-        for c in conflicts
-    ]
 
     return RosterGridViewResponse(
         roster_id=roster.id,
@@ -2498,6 +2546,19 @@ def apply_conflict_resolutions(
         validation_conflicts_count=len(val_conflicts),
         applied_at=now,
     )
+
+
+@router.post("/revalidate-all")
+def revalidate_all_rosters(
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_manager),
+) -> dict[str, Any]:
+    """
+    On-demand recomputation across active rosters using current database state.
+    """
+    from app.modules.roster.recompute import recompute_all_active_rosters_conflicts
+    return recompute_all_active_rosters_conflicts(db)
+
 
 
 

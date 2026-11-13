@@ -3,7 +3,8 @@ from __future__ import annotations
 import calendar
 import uuid
 from datetime import date
-from sqlalchemy import select, delete
+from typing import Any
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import Session
 
 from app.modules.operations.models import (
@@ -197,4 +198,50 @@ def recompute_roster_conflicts_sync(db: Session, roster_id: uuid.UUID) -> int:
 
     db.flush()
     return hard_count
+
+
+def recompute_all_active_rosters_conflicts(db: Session) -> dict[str, Any]:
+    """
+    On-demand recomputation across active rosters (DRAFT, VALIDATED, PUBLISHED, STALE).
+    Updates roster_conflicts, updates roster status, and returns a consolidated summary.
+    """
+    rosters = db.scalars(
+        select(Roster).where(
+            Roster.status.in_([RosterStatus.DRAFT, RosterStatus.VALIDATED, RosterStatus.PUBLISHED, RosterStatus.STALE])
+        ).order_by(Roster.created_at.desc())
+    ).all()
+
+    total_conflicts = 0
+    total_hard = 0
+    summaries = []
+
+    for r in rosters:
+        hard_count = recompute_roster_conflicts_sync(db, r.id)
+        count = db.scalar(
+            select(func.count(RosterConflict.id)).where(RosterConflict.roster_id == r.id)
+        ) or 0
+        total_conflicts += count
+        total_hard += hard_count
+        summaries.append({
+            "roster_id": str(r.id),
+            "roster_name": r.name,
+            "status": r.status.value,
+            "total_conflicts": count,
+            "hard_conflicts": hard_count,
+        })
+
+    db.flush()
+    return {
+        "checked": True,
+        "rosters_checked": len(rosters),
+        "total_conflicts": total_conflicts,
+        "hard_conflicts": total_hard,
+        "rosters": summaries,
+        "message": (
+            f"Conflict check completed across {len(rosters)} roster(s): "
+            f"{total_hard} hard violation(s), {total_conflicts} total conflict(s) identified."
+            if len(rosters) > 0 else "No active rosters to check."
+        ),
+    }
+
 

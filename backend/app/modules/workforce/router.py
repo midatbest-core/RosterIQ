@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import time
 from uuid import UUID
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, func, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import AppError
@@ -138,11 +139,85 @@ def update_pod(pod_id: UUID, payload: PodUpdate, db: Session = Depends(get_db)) 
     return pod_read(require_pod(db, pod.id))
 
 
-@router.delete("/pods/{pod_id}", status_code=204, dependencies=mutation_dependencies)
-def deactivate_pod(pod_id: UUID, db: Session = Depends(get_db)) -> None:
+@router.delete("/pods/{pod_id}", dependencies=mutation_dependencies)
+def delete_pod(pod_id: UUID, db: Session = Depends(get_db)) -> dict[str, Any]:
     pod = require_pod(db, pod_id)
-    pod.is_active = False
+    
+    # 1. Find all employees currently in this pod
+    pod_employees = db.scalars(select(Employee).where(Employee.pod_id == pod_id)).all()
+    
+    # 2. Find other active pods to relocate members to
+    other_pods = db.scalars(select(Pod).where(Pod.id != pod_id, Pod.is_active == True)).all()
+    target_pod = None
+    moved_count = len(pod_employees)
+    
+    if other_pods:
+        # Find the other pod with the least active employees
+        counts = []
+        for op in other_pods:
+            c = db.scalar(
+                select(func.count(Employee.id)).where(
+                    Employee.pod_id == op.id,
+                    Employee.status == EmployeeStatus.ACTIVE,
+                )
+            ) or 0
+            counts.append((c, op))
+        counts.sort(key=lambda x: (x[0], x[1].name))
+        target_pod = counts[0][1]
+        
+        # Move all employees to target pod
+        target_id = target_pod.id if target_pod else None
+        db.execute(
+            update(Employee)
+            .where(Employee.pod_id == pod_id)
+            .values(pod_id=target_id)
+        )
+        emp_ids = [e.id for e in pod_employees]
+        if emp_ids:
+            db.execute(
+                update(User)
+                .where(User.employee_id.in_(emp_ids))
+                .values(pod_id=target_id)
+            )
+        # Detach employees from pod relationship collection so SQLAlchemy UOW won't null out pod_id on cascade
+        pod.employees = []
+    else:
+        db.execute(
+            update(Employee)
+            .where(Employee.pod_id == pod_id)
+            .values(pod_id=None)
+        )
+        emp_ids = [e.id for e in pod_employees]
+        if emp_ids:
+            db.execute(
+                update(User)
+                .where(User.employee_id.in_(emp_ids))
+                .values(pod_id=None)
+            )
+        pod.employees = []
+                
+    # 3. Clean up any pod lead mapping for this pod
+    db.execute(delete(PodLead).where(PodLead.pod_id == pod_id))
+    
+    # 4. Delete the pod
+    pod_name = pod.name
+    db.delete(pod)
     db.commit()
+    
+    return {
+        "status": "SUCCESS",
+        "deleted_pod_id": str(pod_id),
+        "deleted_pod_name": pod_name,
+        "moved_employees_count": moved_count,
+        "target_pod_id": str(target_pod.id) if target_pod else None,
+        "target_pod_name": target_pod.name if target_pod else "Unassigned",
+        "message": (
+            f"Pod '{pod_name}' deleted successfully. "
+            f"{moved_count} employees relocated to '{target_pod.name}' (pod with least members)."
+            if target_pod
+            else f"Pod '{pod_name}' deleted. {moved_count} employees set to unassigned."
+        ),
+    }
 
 
 @router.get("/employees", response_model=list[EmployeeRead])

@@ -49,6 +49,11 @@ class RosterConflictResponse(BaseModel):
     conflict_type: ConflictType
     description: str
     is_resolved: bool
+    brand_name: str | None = None
+    process_name: str | None = None
+    required_skill: str | None = None
+    pod_name: str | None = None
+    pod_id: uuid.UUID | None = None
 
 
 class AllocationCell(BaseModel):

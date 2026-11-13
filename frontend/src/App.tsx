@@ -277,16 +277,36 @@ export const App: React.FC = () => {
       )}
 
       {activeTab === 'employees' && (
-        <WorkforceScreen initialSubTab="employees" searchQuery={searchQuery} currentUser={currentUser} />
+        <WorkforceScreen
+          initialSubTab="employees"
+          searchQuery={searchQuery}
+          currentUser={currentUser}
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+        />
       )}
 
       {activeTab === 'pods' && (
-        <WorkforceScreen initialSubTab="pods" searchQuery={searchQuery} currentUser={currentUser} />
+        <WorkforceScreen
+          initialSubTab="pods"
+          searchQuery={searchQuery}
+          currentUser={currentUser}
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+        />
       )}
 
-      {activeTab === 'brands' && <OperationsScreen initialSubTab="brands" />}
+      {activeTab === 'brands' && (
+        <OperationsScreen
+          initialSubTab="brands"
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+        />
+      )}
 
-      {activeTab === 'assignments' && <OperationsScreen initialSubTab="assignments" />}
+      {activeTab === 'assignments' && (
+        <OperationsScreen
+          initialSubTab="assignments"
+          onNavigateToConflicts={() => setActiveTab('conflicts')}
+        />
+      )}
 
       {activeTab === 'history' && (
         <AuditHistoryScreen

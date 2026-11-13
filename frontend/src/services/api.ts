@@ -190,12 +190,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
+  deletePod: (podId: string) =>
+    request<{ status: string; message: string; target_pod_name?: string }>(`/pods/${podId}`, {
+      method: 'DELETE',
+    }),
 
   getEmployees: () => request<Employee[]>('/employees'),
   createEmployee: (data: Partial<Employee>) =>
     request<Employee>('/employees', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  relocateEmployee: (employeeId: string, podId: string | null) =>
+    request<Employee>(`/employees/${employeeId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ pod_id: podId }),
     }),
 
   // Availability & Leaves
@@ -236,6 +245,10 @@ export const api = {
     request<Brand>('/brands', {
       method: 'POST',
       body: JSON.stringify({ code, name }),
+    }),
+  deleteBrand: (brandId: string) =>
+    request<{ status: string; message: string; deleted_brand_name?: string }>(`/brands/${brandId}`, {
+      method: 'DELETE',
     }),
 
   getProcesses: () => request<ProcessItem[]>('/processes'),
@@ -334,6 +347,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  revalidateAllRosters: () =>
+    request<{ checked: boolean; rosters_checked: number; total_conflicts: number; hard_conflicts: number; message: string }>(
+      '/rosters/revalidate-all',
+      {
+        method: 'POST',
+      }
+    ),
   // Brand Portal
   getBrandProfile: () => request<import('./types').BrandProfile>('/brand-portal/me'),
   submitBrandRequest: (data: {
