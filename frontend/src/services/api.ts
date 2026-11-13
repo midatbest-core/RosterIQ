@@ -19,6 +19,7 @@ import {
   AppNotification,
   PresentationDemoAccount,
   DemoRole,
+  QuickLoginAccount,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -145,6 +146,15 @@ export const api = {
   },
   getPresentationDemoAccounts: () =>
     request<PresentationDemoAccount[]>('/auth/presentation-demo-accounts'),
+  getQuickLoginAccounts: async (): Promise<{ employees: QuickLoginAccount[]; brands: QuickLoginAccount[] }> => {
+    try {
+      return await request<{ employees: QuickLoginAccount[]; brands: QuickLoginAccount[] }>(
+        '/auth/quick-login-accounts'
+      );
+    } catch {
+      return { employees: [], brands: [] };
+    }
+  },
   getCurrentUser: () => request<User>('/auth/me'),
   logout: async () => {
     try {

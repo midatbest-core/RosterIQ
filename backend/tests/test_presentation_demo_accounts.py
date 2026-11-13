@@ -34,6 +34,11 @@ def test_production_rejection_for_all_demo_endpoints(monkeypatch):
     assert res3.status_code == 403
     assert "production" in res3.json()["error"]["message"].lower()
 
+    # 4. quick-login-accounts rejected in production
+    res4 = prod_client.get("/api/v1/auth/quick-login-accounts")
+    assert res4.status_code == 403
+    assert "production" in res4.json()["error"]["message"].lower()
+
     get_settings.cache_clear()
 
 
@@ -139,3 +144,52 @@ def test_cookie_samesite_modes(monkeypatch):
     get_settings.cache_clear()
     assert get_settings().effective_cookie_samesite == "none"
     get_settings.cache_clear()
+
+
+def test_quick_login_accounts_directory_and_authentication(monkeypatch):
+    """GET /api/v1/auth/quick-login-accounts returns active employees and brands, which can authenticate."""
+    monkeypatch.setenv("ROSTERIQ_ENVIRONMENT", "staging")
+    monkeypatch.setenv("ROSTERIQ_ENABLE_DEMO_CREDENTIALS", "true")
+    get_settings.cache_clear()
+
+    resp = client.get("/api/v1/auth/quick-login-accounts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "employees" in data and "brands" in data
+    assert len(data["employees"]) > 0
+    assert len(data["brands"]) > 0
+
+    # Verify first employee structure
+    emp = data["employees"][0]
+    assert "id" in emp and "name" in emp and "email" in emp and "password" in emp and "role" in emp
+    assert emp["role"] == "EMPLOYEE"
+    assert emp["password"] == "EmployeePass123!"
+
+    # Verify first brand structure
+    brand = data["brands"][0]
+    assert "id" in brand and "name" in brand and "code" in brand and "email" in brand and "password" in brand
+    assert brand["role"] == "BRAND_USER"
+    assert brand["password"] == "BrandPass123!"
+
+    # Test authenticating as the brand user
+    brand_client = TestClient(app)
+    brand_login = brand_client.post(
+        "/api/v1/auth/login",
+        json={"email": brand["email"], "password": brand["password"]},
+    )
+    assert brand_login.status_code == 200
+    assert brand_login.json()["user"]["role"] == "BRAND_USER"
+    assert "access_token" in brand_login.cookies
+
+    # Test authenticating as the employee
+    emp_client = TestClient(app)
+    emp_login = emp_client.post(
+        "/api/v1/auth/login",
+        json={"email": emp["email"], "password": emp["password"]},
+    )
+    assert emp_login.status_code == 200
+    assert emp_login.json()["user"]["role"] == "EMPLOYEE"
+    assert "access_token" in emp_login.cookies
+
+    get_settings.cache_clear()
+

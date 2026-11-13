@@ -539,6 +539,18 @@ export interface DemoRole {
   email: string;
 }
 
+export interface QuickLoginAccount {
+  id: string;
+  name: string;
+  employee_code?: string;
+  code?: string;
+  email: string;
+  password: string;
+  pod_name?: string;
+  role: string;
+}
+
+
 
 
 

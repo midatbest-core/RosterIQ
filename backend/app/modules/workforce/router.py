@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import AppError
+from app.core.security import hash_password
 from app.db.session import get_db
 from app.modules.auth.dependencies import require_lead_or_manager, require_manager, verify_csrf
 from app.modules.auth.models import User, UserRole
@@ -173,6 +174,26 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db)) -> E
     db.add(employee)
     db.commit()
     db.refresh(employee)
+
+    # Provision User credentials for the newly created employee
+    temp_pass = "EmployeePass123!"
+    user = db.scalar(select(User).where(User.email == employee.email))
+    if not user:
+        user = User(
+            email=employee.email,
+            password_hash=hash_password(temp_pass),
+            role=UserRole.EMPLOYEE,
+            employee_id=employee.id,
+            pod_id=employee.pod_id,
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+    else:
+        user.employee_id = employee.id
+        user.pod_id = employee.pod_id
+        db.commit()
+
     return employee
 
 

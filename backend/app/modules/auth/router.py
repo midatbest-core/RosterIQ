@@ -208,7 +208,58 @@ async def stream_notifications(
 
 
 
+@router.get("/quick-login-accounts")
+def get_quick_login_accounts(db: Session = Depends(get_db)) -> dict:
+    """Returns all available demo brand and employee accounts with login credentials.
+    Strictly forbidden in production mode."""
+    settings = get_settings()
+    if settings.environment.lower() == "production":
+        raise AppError("FORBIDDEN", "Demo accounts directory is strictly disabled in production.", 403)
+    if not settings.enable_demo_credentials:
+        raise AppError("FORBIDDEN", "Demo access is disabled.", 403)
+
+    from app.modules.workforce.models import Employee, Pod
+    from app.modules.operations.models import Brand
+
+    employees = db.scalars(
+        select(Employee).where(Employee.status == "ACTIVE").order_by(Employee.name)
+    ).all()
+    pod_map = {p.id: p.name for p in db.scalars(select(Pod)).all()}
+
+    emp_list = []
+    for emp in employees:
+        pod_name = pod_map.get(emp.pod_id, "Unassigned Pod")
+        emp_list.append({
+            "id": str(emp.id),
+            "name": emp.name,
+            "employee_code": emp.employee_code,
+            "email": emp.email,
+            "password": "EmployeePass123!",
+            "pod_name": pod_name,
+            "role": "EMPLOYEE",
+        })
+
+    brands = db.scalars(select(Brand).where(Brand.status == "ACTIVE").order_by(Brand.name)).all()
+    brand_list = []
+    for b in brands:
+        b_clean = b.code.lower().replace("_", "").replace("-", "")
+        brand_list.append({
+            "id": str(b.id),
+            "name": b.name,
+            "code": b.code,
+            "email": f"brand.{b_clean}@example.com",
+            "password": "BrandPass123!",
+            "role": "BRAND_USER",
+        })
+
+    return {
+        "employees": emp_list,
+        "brands": brand_list,
+    }
+
+
 @router.get("/demo-accounts")
+
 
 def get_demo_accounts(db: Session = Depends(get_db)) -> dict:
     """Returns local demonstration accounts grouped by role, pod, and brand. Only available in local/demo mode."""
